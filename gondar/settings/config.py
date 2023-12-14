@@ -1,4 +1,4 @@
-from gondar.utils.baseConfig import baseConfig
+from gondar.utils.baseModel import baseConfig
 
 
 class IdentityConfig(baseConfig):

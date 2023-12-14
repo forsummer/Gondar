@@ -1,6 +1,16 @@
 from abc import abstractmethod
 
 
+class baseConfig(object):
+    @classmethod
+    def to_dict(cls):
+        return {
+            attr: getattr(cls, attr)
+            for attr in dir(cls)
+            if not callable(getattr(cls, attr)) and not attr.startswith("__")
+        }
+
+
 class baseFetcher(object):
     def __init__(self) -> None:
         ...
@@ -29,3 +39,7 @@ class baseFetcher(object):
         """
         The post-processing after _fetch.
         """
+
+
+class baseParser(object):
+    ...
