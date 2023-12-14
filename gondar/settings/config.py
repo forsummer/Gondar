@@ -1,4 +1,4 @@
-from gondar.utils.baseModel import baseConfig
+from gondar.utils.base import baseConfig
 
 
 class IdentityConfig(baseConfig):
@@ -18,7 +18,13 @@ class NetworkConfig(baseConfig):
     HTTPS_PROXY: str | None = None
     FTP_PROXY: str | None = None
 
-    MAX_RETRY: int | None = 3
-    RETRY_GAP: int | None = 5
+    MAX_RETRY: int | None = 3  # times
+    RETRY_GAP: int | None = 5  # sec
 
-    TIMEOUT: int | None = 120
+    TIMEOUT: int | None = 120  # sec
+
+
+class PerformanceConfig(baseConfig):
+    """
+    Performance configuration
+    """
