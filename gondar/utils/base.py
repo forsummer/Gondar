@@ -52,10 +52,6 @@ class baseFetcher(baseModel):
     def get_data(self):
         return self.data
 
-    @property
-    def dtype(self) -> Type:
-        return type(self.data)
-
     @abstractmethod
     def fetch(self):
         """
@@ -86,14 +82,6 @@ class baseParser(baseModel):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    @classmethod
-    def withParser(cls):
-        @functools.wraps()
-        def wrapper():
-            return
-
-        return wrapper
-
     @abstractmethod
     def parse(self):
         ...
@@ -109,3 +97,29 @@ class baseParser(baseModel):
     @abstractmethod
     def _post_parse(self):
         ...
+
+
+class basePublisher(baseModel):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    @abstractmethod
+    def publish(self):
+        ...
+
+    @abstractmethod
+    def _pre_publish(self):
+        ...
+
+    @abstractmethod
+    def _publish(self):
+        ...
+
+    @abstractmethod
+    def _post_publish(self):
+        ...
+
+
+class basePipe(baseModel):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
