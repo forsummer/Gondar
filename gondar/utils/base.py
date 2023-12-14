@@ -1,25 +1,16 @@
 import functools
+import shelve
 from abc import abstractmethod
 from inspect import Parameter
 from typing import Any, Dict, List, Set, Type
 
-
-class baseConfig(object):
-    @classmethod
-    def to_dict(cls):
-        return {
-            attr: getattr(cls, attr)
-            for attr in dir(cls)
-            if not callable(getattr(cls, attr)) and not attr.startswith("__")
-        }
+from gondar.settings import Gconfig
 
 
 class baseModel(object):
     _OPTIONS: List[Parameter | None] = []
 
     def __init__(self, **kwargs) -> None:
-        self.data = None
-
         self._default_options: Dict[str, Any] = self.add_default_options()
 
         # Safely update outsource args
@@ -40,6 +31,14 @@ class baseModel(object):
             self._default_options.update(
                 {k: v for k, v in kwargs.items() if k in updated_options}
             )
+
+    def save_checkpoint(self, key, value, save_path: str | None = None):
+        save_path: str = save_path or (
+            Gconfig["CACHE_DIRECTORY"] + Gconfig["SHELVE_NAME"]
+        )
+
+        with shelve.open(save_path, "c") as shelf:
+            shelf[key] = value
 
 
 class baseFetcher(baseModel):

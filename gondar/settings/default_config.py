@@ -1,4 +1,25 @@
-from gondar.utils.base import baseConfig
+class baseConfig(object):
+    @classmethod
+    def to_dict(cls):
+        return {
+            attr: getattr(cls, attr)
+            for attr in dir(cls)
+            if not callable(getattr(cls, attr)) and not attr.startswith("__")
+        }
+
+
+class CacheConfig(baseConfig):
+    """
+    CacheConfig
+    """
+
+    SAVE_CHECKPOINT: bool = False
+
+    ALLOW_PARENT: bool = True
+    CACHE_DIRECTORY: str = ".local/"
+
+    USE_SHELVE: bool = True
+    SHELVE_NAME: str = "local.shelf"
 
 
 class IdentityConfig(baseConfig):

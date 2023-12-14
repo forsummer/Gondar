@@ -1,13 +1,12 @@
-from typing import Dict
+import os
+from pathlib import Path
 
-from dotenv import dotenv_values
+from gondar.settings.auto_config import Gconfig
 
-from gondar.settings import config
+if Gconfig["SAVE_CHECKPOINT"] and Gconfig["ALLOW_PARENT"]:
+    cache_dir = Path.cwd() / Path(Gconfig["CACHE_DIRECTORY"])
 
-gconfig: Dict = {}
-for klass in dir(config):
-    if klass.endswith("Config"):
-        k = getattr(config, klass)
-        gconfig.update(k.to_dict())
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=Gconfig["ALLOW_PARENT"])
 
-gconfig.update(dotenv_values())
+__all__ = ["Gconfig"]

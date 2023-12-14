@@ -5,7 +5,7 @@ from Bio import Entrez
 from bs4 import BeautifulSoup
 
 from gondar.exception import EnviromentError
-from gondar.settings import gconfig
+from gondar.settings import Gconfig
 from gondar.utils.base import baseFetcher, baseParser
 
 
@@ -45,19 +45,21 @@ class PubMedFetcher(baseFetcher):
         Prepare Entrez settings.
         """
 
-        Entrez.email: str | None = gconfig.get("EMAIL", None)
+        Entrez.email: str | None = Gconfig.get("EMAIL", None)
         if Entrez.email is None:
             raise EnviromentError("Found no user email in ENVIRON for Entrez API!")
 
-        Entrez.max_tries: int | None = gconfig.get("MAX_RETRY")
-        Entrez.sleep_between_tries: int | None = gconfig.get("RETRY_GAP")
+        Entrez.max_tries: int | None = Gconfig.get("MAX_RETRY")
+        Entrez.sleep_between_tries: int | None = Gconfig.get("RETRY_GAP")
 
     def _fetch(self, searchTerm: str):
         """
         Use Entrez.esearch to collect IDs of target article.
         Then use Entrez.efetch to get the full text of article (default as XML).
         """
+        save_checkpoint = Gconfig.get("SAVE_CHECKPOINT")
 
+        # Esearch for related pmc id
         try:
             with Entrez.esearch(
                 db=self._DB, term=searchTerm, **self._default_options
@@ -65,16 +67,28 @@ class PubMedFetcher(baseFetcher):
                 searchResults = BeautifulSoup(
                     searchHandle.read(), self._default_options["retmode"]
                 )
+
                 id_set = [
                     id_tag.text
                     for id_tag in searchResults.find_all(self._EXTRACT_ID_TAG)
                 ]
+
+                if save_checkpoint:
+                    self.save_checkpoint(f"{searchTerm}.id_set", id_set)
+
         except Exception as e:
             raise e
 
+        # Efetch for full text
         try:
             with Entrez.efetch(db=self._DB, id=id_set) as fetchHandle:
-                self.data = BeautifulSoup(fetchHandle.read(), "xml")
+                self.data = BeautifulSoup(
+                    fetchHandle.read(), self._default_options["retmode"]
+                )
+
+                if save_checkpoint:
+                    self.save_checkpoint(f"{searchTerm}.xml", self.data)
+
         except Exception as e:
             raise e
 
