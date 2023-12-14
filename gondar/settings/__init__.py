@@ -1,10 +1,13 @@
-import os
+from typing import Dict
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
-from gondar.settings.config import IdentityConfig, NetworkConfig
+from gondar.settings import config
 
-os.environ.update(**IdentityConfig)
-os.environ.update(**NetworkConfig)
+gconfig: Dict = {}
+for klass in dir(config):
+    if klass.endswith("Config"):
+        k = getattr(config, klass)
+        gconfig.update(k.to_dict())
 
-load_dotenv(verbose=True)
+gconfig.update(dotenv_values())

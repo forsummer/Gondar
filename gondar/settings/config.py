@@ -1,7 +1,7 @@
-from enum import Enum
+from gondar.utils.baseConfig import baseConfig
 
 
-class IdentityConfig(Enum):
+class IdentityConfig(baseConfig):
     """
     Identity configuration.
     """
@@ -9,7 +9,7 @@ class IdentityConfig(Enum):
     EMAIL: str | None = None
 
 
-class NetworkConfig(Enum):
+class NetworkConfig(baseConfig):
     """
     Network configuration
     """
