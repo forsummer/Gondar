@@ -51,3 +51,12 @@ class NetIOError(BaseError):
 
     def __init__(self, msg: str = None) -> None:
         super().__init__(msg)
+
+
+class TimeoutError(BaseError):
+    """
+    Timeout exception
+    """
+
+    def __init__(self, msg: str = None) -> None:
+        super().__init__(msg)
