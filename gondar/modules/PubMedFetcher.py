@@ -1,5 +1,4 @@
 import logging
-import os
 from inspect import Parameter
 from typing import Any, Dict, List
 
@@ -7,14 +6,18 @@ from Bio import Entrez
 from bs4 import BeautifulSoup
 
 from gondar.exception import EnviromentError, NetIOError
+from gondar.settings import gconfig
 from gondar.utils.baseFetcher import baseFetcher
+from gondar.utils.timeout import timeout
 
 
 class PubMedFetcher(baseFetcher):
-    __DB: str = "pubmed"
+    # Use "pmc" instead of "pubmed" for fetching free full text.
+    __DB: str = "pmc"
 
     __EXTRACT_ID_TAG: str = "Id"
 
+    # Ref to: https://www.ncbi.nlm.nih.gov/books/NBK25499/
     __ESEARCH_OPTIONS: List[Parameter] = [
         Parameter("retstart", kind=Parameter.KEYWORD_ONLY, default=0),
         Parameter("retmax", kind=Parameter.KEYWORD_ONLY, default=20),
@@ -27,7 +30,7 @@ class PubMedFetcher(baseFetcher):
         Parameter("maxdate", kind=Parameter.KEYWORD_ONLY, default=None),
     ]
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs):
         super().__init__()
 
         self._default_options: Dict[str, Any] = {
@@ -37,11 +40,11 @@ class PubMedFetcher(baseFetcher):
 
         self.data = None
 
-    def reset_default_options(self, **kwargs) -> None:
-        exist_params = set(self._default_options.keys()) & set(kwargs.keys())
-        if exist_params is not None:
+    def reset_default_options(self, **kwargs):
+        updated_options = set(self._default_options.keys()) & set(kwargs.keys())
+        if updated_options is not None:
             self._default_options.update(
-                {k: v for k, v in kwargs.items() if k in exist_params}
+                {k: v for k, v in kwargs.items() if k in updated_options}
             )
 
     def fetch(self, searchTerm: str):
@@ -51,21 +54,22 @@ class PubMedFetcher(baseFetcher):
 
         self._post_fetch()
 
-    def _pre_fetch(self) -> None:
+    def _pre_fetch(self):
         """
         Prepare Entrez settings.
         """
 
-        Entrez.email: str | None = os.environ.get("EMAIL", None)
+        Entrez.email: str | None = gconfig.get("EMAIL", None)
         if Entrez.email is None:
             e = EnviromentError("Found no user email in ENVIRON for Entrez API!")
             logging.error(e)
             raise e
 
-        Entrez.max_tries: int | None = os.environ.get("MAX_RETRY")
-        Entrez.sleep_between_tries: int | None = os.environ.get("RETRY_GAP")
+        Entrez.max_tries: int | None = gconfig.get("MAX_RETRY")
+        Entrez.sleep_between_tries: int | None = gconfig.get("RETRY_GAP")
 
-    def _fetch(self, searchTerm: str) -> None:
+    @timeout(15)
+    def _fetch(self, searchTerm: str):
         """
         Use Entrez.esearch to collect IDs of target article.
         Then use Entrez.efetch to get the full text of article (default as XML).
@@ -75,25 +79,25 @@ class PubMedFetcher(baseFetcher):
             with Entrez.esearch(
                 db=self.__DB, term=searchTerm, **self._default_options
             ) as searchHandle:
-                searchResults = BeautifulSoup(searchHandle.read(), self._MODE)
+                searchResults = BeautifulSoup(
+                    searchHandle.read(), self._default_options["retmode"]
+                )
                 id_set = [
                     id_tag.text
                     for id_tag in searchResults.find_all(self.__EXTRACT_ID_TAG)
                 ]
-        except NetIOError("Entrez search failed") as e:
-            logging.error(e)
+        except Exception as e:
+            logging.error(NetIOError(e))
             raise e
 
         try:
-            with Entrez.efetch(
-                db=self.__DB, id=id_set, **self._default_options
-            ) as fetchHandle:
-                self.data = fetchHandle.read()
-        except NetIOError("Entrez fetch failed") as e:
-            logging.error(e)
+            with Entrez.efetch(db=self.__DB, id=id_set) as fetchHandle:
+                self.data = fetchHandle.read(), self._default_options["retmode"]
+        except Exception as e:
+            logging.error(NetIOError(e))
             raise e
 
-    def _post_fetch(self) -> None:
+    def _post_fetch(self):
         """
         Do nothing after fetching.
         """
