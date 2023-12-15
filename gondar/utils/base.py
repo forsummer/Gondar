@@ -1,10 +1,6 @@
-import functools
-import shelve
 from abc import abstractmethod
 from inspect import Parameter
-from typing import Any, Dict, List, Set, Type
-
-from gondar.settings import Gconfig
+from typing import Any, Dict, List, Set
 
 
 class baseModel(object):
@@ -15,6 +11,8 @@ class baseModel(object):
 
         # Safely update outsource args
         self.reset_default_options(**kwargs)
+
+        self.data = None
 
     def add_default_options(cls):
         _options: List[Parameter | None] = cls._OPTIONS
@@ -32,20 +30,12 @@ class baseModel(object):
                 {k: v for k, v in kwargs.items() if k in updated_options}
             )
 
-    def checkpoint(self, key, value, save_path: str | None = None):
-        save_path: str = save_path or (Gconfig.CACHE_DIRECTORY + Gconfig.SHELVE_NAME)
-
-        with shelve.open(save_path, "c") as shelf:
-            shelf[key] = value
-
 
 class baseFetcher(baseModel):
     _OPTIONS: List[Parameter | None] = []
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-
-        self.data = None
 
     def get_data(self):
         return self.data
@@ -75,10 +65,20 @@ class baseFetcher(baseModel):
         The post-processing after _fetch.
         """
 
+    async def afetch(self):
+        ...
+
+    async def _afetch(self):
+        ...
+
 
 class baseParser(baseModel):
+    _OPTIONS: List[Parameter | None] = []
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
+
+        self.workflow = None
 
     @abstractmethod
     def parse(self):
@@ -96,8 +96,20 @@ class baseParser(baseModel):
     def _post_parse(self):
         ...
 
+    @abstractmethod
+    def _pipeline(self):
+        ...
+
+    def _SPpipeline(self):
+        ...
+
+    def _MPpipeline(self):
+        ...
+
 
 class basePublisher(baseModel):
+    _OPTIONS: List[Parameter | None] = []
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
@@ -117,7 +129,8 @@ class basePublisher(baseModel):
     def _post_publish(self):
         ...
 
+    async def apublish(self):
+        ...
 
-class basePipe(baseModel):
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    async def _apublish(self):
+        ...

@@ -13,13 +13,11 @@ class _CacheConfig(__baseConfig):
     CacheConfig
     """
 
-    SAVE_CHECKPOINT: bool = False
 
-    ALLOW_PARENT: bool = True
-    CACHE_DIRECTORY: str = ".local/"
-
-    USE_SHELVE: bool = True
-    SHELVE_NAME: str = "local.shelf"
+class _SqlConfig(__baseConfig):
+    """
+    SQL config
+    """
 
 
 class _IdentityConfig(__baseConfig):
@@ -52,4 +50,7 @@ class _PerformanceConfig(__baseConfig):
 
     USE_MULTIPROCESSING: bool = False
     USE_MAX_PROCESSOR: bool = False
-    USE_PROCESSOR: int = 1
+    USEABLE_PROCESSOR: int = 1
+
+    USE_MULTITHREADING: bool = False
+    USEABLE_THREADS: int = 1
