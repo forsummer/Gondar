@@ -100,10 +100,10 @@ class baseParser(baseModel):
     def _pipeline(self):
         ...
 
-    def _SPpipeline(self):
+    def _LoopPipeline(self):
         ...
 
-    def _MPpipeline(self):
+    def _MpPipeline(self):
         ...
 
 
