@@ -1,4 +1,4 @@
-class baseConfig(object):
+class __baseConfig(object):
     @classmethod
     def to_dict(cls):
         return {
@@ -8,7 +8,7 @@ class baseConfig(object):
         }
 
 
-class CacheConfig(baseConfig):
+class _CacheConfig(__baseConfig):
     """
     CacheConfig
     """
@@ -22,7 +22,7 @@ class CacheConfig(baseConfig):
     SHELVE_NAME: str = "local.shelf"
 
 
-class IdentityConfig(baseConfig):
+class _IdentityConfig(__baseConfig):
     """
     Identity configuration.
     """
@@ -30,7 +30,7 @@ class IdentityConfig(baseConfig):
     EMAIL: str | None = None
 
 
-class NetworkConfig(baseConfig):
+class _NetworkConfig(__baseConfig):
     """
     Network configuration
     """
@@ -45,7 +45,11 @@ class NetworkConfig(baseConfig):
     TIMEOUT: int | None = 120  # sec
 
 
-class PerformanceConfig(baseConfig):
+class _PerformanceConfig(__baseConfig):
     """
     Performance configuration
     """
+
+    USE_MULTIPROCESSING: bool = False
+    USE_MAX_PROCESSOR: bool = False
+    USE_PROCESSOR: int = 1

@@ -32,10 +32,8 @@ class baseModel(object):
                 {k: v for k, v in kwargs.items() if k in updated_options}
             )
 
-    def save_checkpoint(self, key, value, save_path: str | None = None):
-        save_path: str = save_path or (
-            Gconfig["CACHE_DIRECTORY"] + Gconfig["SHELVE_NAME"]
-        )
+    def checkpoint(self, key, value, save_path: str | None = None):
+        save_path: str = save_path or (Gconfig.CACHE_DIRECTORY + Gconfig.SHELVE_NAME)
 
         with shelve.open(save_path, "c") as shelf:
             shelf[key] = value
