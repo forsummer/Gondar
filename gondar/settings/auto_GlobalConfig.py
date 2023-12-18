@@ -74,5 +74,23 @@ def _update_Gconfig(set_config, new_config: Dict):
     set_config(new_config)
 
 
+def typed_dotenv():
+    dot_env = {}
+    for k, v in dotenv_values().items():
+        try:
+            typed_v = eval(v)
+        except:
+            v = v
+        else:
+            if isinstance(typed_v, (bool, int, float, list, dict)):
+                v = typed_v
+            else:
+                v = str(v)
+
+        dot_env.update({k: v})
+
+    return dot_env
+
+
 __init_Gconfig()
-_update_Gconfig(dotenv_values())
+_update_Gconfig(typed_dotenv())

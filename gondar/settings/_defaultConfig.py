@@ -37,10 +37,10 @@ class _NetworkConfig(__baseConfig):
     HTTPS_PROXY: str | None = None
     FTP_PROXY: str | None = None
 
-    MAX_RETRY: int | None = 3  # times
-    RETRY_GAP: int | None = 5  # sec
+    MAX_RETRY: int = 3  # times
+    RETRY_GAP: int = 5  # sec
 
-    TIMEOUT: int | None = 120  # sec
+    TIMEOUT: int = 120  # sec
 
 
 class _PerformanceConfig(__baseConfig):
