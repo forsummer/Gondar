@@ -44,6 +44,15 @@ class EnviromentError(BaseError):
         super().__init__(msg)
 
 
+class ModuleError(Exception):
+    """
+    Module exception.
+    """
+
+    def __init__(self, msg: str = None) -> None:
+        super().__init__(msg)
+
+
 class NetIOError(BaseError):
     """
     Network exception.
