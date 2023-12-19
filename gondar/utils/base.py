@@ -1,6 +1,7 @@
+import multiprocessing as mp
 from abc import abstractmethod
 from inspect import Parameter
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, Iterator, List
 
 
 class baseModel(object):
@@ -12,19 +13,17 @@ class baseModel(object):
         # Safely update outsource args
         self.reset_default_options(**kwargs)
 
-        self.data = None
+        self.data: Any = None
 
     def add_default_options(cls):
-        _options: List[Parameter | None] = cls._OPTIONS
+        _options = cls._OPTIONS
 
         return (
             {arg.name: arg.default for arg in _options} if _options is not None else {}
         )
 
     def reset_default_options(self, **kwargs):
-        updated_options: Set[str] = set(self._default_options.keys()) & set(
-            kwargs.keys()
-        )
+        updated_options = set(self._default_options.keys()) & set(kwargs.keys())
         if updated_options is not None:
             self._default_options.update(
                 {k: v for k, v in kwargs.items() if k in updated_options}
@@ -37,14 +36,14 @@ class baseFetcher(baseModel):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def get_data(self):
-        return self.data
+        self.data = None
 
-    @abstractmethod
-    def fetch(self):
-        """
-        The full fetch progress.
-        """
+    def fetch(self, searchTerm: Any) -> None:
+        self._pre_fetch()
+
+        self._fetch(searchTerm)
+
+        self._post_fetch()
 
     @abstractmethod
     def _pre_fetch(self):
@@ -78,11 +77,27 @@ class baseParser(baseModel):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-        self.workflow = None
+        self.data = None
+        self._pipeline: Callable[[Any], Dict] = None
 
-    @abstractmethod
-    def parse(self):
-        ...
+    class assmPipeline:
+        def __init__(self, *workers) -> None:
+            self.regWorkers = workers
+
+        def __call__(self, source: Any) -> Dict[str, Any]:
+            output: Dict = {}
+
+            for worker in self.regWorkers:
+                output.update(worker(source))
+
+            return output
+
+    def parse(self, source: Any):
+        self._pre_parse()
+
+        self._parse(source)
+
+        self._post_parse()
 
     @abstractmethod
     def _pre_parse(self):
@@ -96,15 +111,12 @@ class baseParser(baseModel):
     def _post_parse(self):
         ...
 
-    @abstractmethod
-    def _pipeline(self):
-        ...
+    def _LoopPipeline(self, sourceIter: Iterator[Any]) -> List:
+        return [self._pipeline(source) for source in sourceIter]
 
-    def _LoopPipeline(self):
-        ...
-
-    def _MpPipeline(self):
-        ...
+    def _MpPipeline(self, processes: int, sourceIter: Iterator[Any]) -> List:
+        with mp.Pool(processes=processes) as pool:
+            return pool.map(self._pipeline, sourceIter)
 
 
 class basePublisher(baseModel):

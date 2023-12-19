@@ -1,11 +1,11 @@
-import multiprocessing as mp
 from inspect import Parameter
-from typing import Iterator, List
+from multiprocessing import cpu_count
+from typing import Callable, Dict, Iterator, List
 
 from Bio import Entrez
-from bs4 import BeautifulSoup, PageElement
+from bs4 import BeautifulSoup, PageElement, Tag
 
-from gondar.exception import EnviromentError
+from gondar.exception import EnviromentError, ModuleError
 from gondar.settings import Gconfig
 from gondar.utils.base import baseFetcher, baseParser
 
@@ -22,11 +22,10 @@ class PubMedFetcher(baseFetcher):
 
     # Use "pmc" instead of "pubmed" for fetching free full text.
     _DB: str = "pmc"
-
     _EXTRACT_ID_TAG: str = "Id"
 
     # Ref to: https://www.ncbi.nlm.nih.gov/books/NBK25499/
-    _ESEARCH_OPTIONS: List[Parameter] = [
+    _ESEARCH_OPTIONS: List[Parameter | None] = [
         Parameter("retstart", kind=Parameter.KEYWORD_ONLY, default=0),
         Parameter("retmax", kind=Parameter.KEYWORD_ONLY, default=20),
         Parameter("retmode", kind=Parameter.KEYWORD_ONLY, default="xml"),
@@ -42,13 +41,6 @@ class PubMedFetcher(baseFetcher):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-
-    def fetch(self, searchTerm: str) -> None:
-        self._pre_fetch()
-
-        self._fetch(searchTerm)
-
-        self._post_fetch()
 
     def _pre_fetch(self) -> None:
         """
@@ -77,7 +69,7 @@ class PubMedFetcher(baseFetcher):
                     handle.read(), self._default_options["retmode"]
                 )
 
-                id_set = [
+                id_set: List[str] = [
                     id_tag.text
                     for id_tag in searchResults.find_all(self._EXTRACT_ID_TAG)
                 ]
@@ -101,53 +93,155 @@ class PubMedFetcher(baseFetcher):
         """
 
 
+(
+    _ARTICLE_TITLE_TAG,
+    _JOURNAL_TITLE_TAG,
+    _ARTICLE_ID_TAG,
+    _PUBDATE_TAG,
+    _SECTION_TAG,
+    _TABLE_TAG,
+    _TABLE_ROW_TAG,
+    _TABLE_HEAD_TAG,
+    _TABLE_DATA_TAG,
+) = (
+    "article-title",
+    "journal-title",
+    "article-id",
+    "pub-date",
+    "sec",
+    "table",
+    "tr",
+    "th",
+    "td",
+)
+
+(
+    _BLANK_LINKER,
+    _SPACE_LINKER,
+    _SLASH_LINKER,
+) = (
+    "",
+    " ",
+    "/",
+)
+
+_filter_meta: Callable[[Tag | None, str], str] = (
+    lambda content, linker: linker.join(content.stripped_strings)
+    if content is not None
+    else ""
+)
+
+
+def _get_Meta(article: BeautifulSoup) -> Dict[str, str]:
+    return {
+        "article": _filter_meta(
+            article.find(_ARTICLE_TITLE_TAG),
+            _BLANK_LINKER,
+        ),
+        "journal": _filter_meta(
+            article.find(_JOURNAL_TITLE_TAG),
+            _BLANK_LINKER,
+        ),
+        "pmcid": _filter_meta(
+            article.find(_ARTICLE_ID_TAG, attrs={"pub-id-type": "pmc"}),
+            _BLANK_LINKER,
+        ),
+        "doi": _filter_meta(
+            article.find(_ARTICLE_ID_TAG, attrs={"pub-id-type": "doi"}),
+            _BLANK_LINKER,
+        ),
+        "pubdate": _filter_meta(
+            article.find(_PUBDATE_TAG, attrs={"pub-type": "epub"}),
+            _SLASH_LINKER,
+        ),
+    }
+
+
+def _get_Body(article: BeautifulSoup) -> Dict[str, List]:
+    sections: Iterator[PageElement] = (
+        section for section in article.find_all(_SECTION_TAG)
+    )
+
+    section_contents: Iterator[str] = (
+        _SPACE_LINKER.join(section.stripped_strings) if section is not None else ""
+        for section in sections
+    )
+
+    return {
+        "body": list(section_contents),
+    }
+
+
+_filter_row: Callable[[Tag | None], List[str]] = lambda row: [
+    _SPACE_LINKER.join(content.stripped_strings)
+    for content in row.find_all([_TABLE_HEAD_TAG, _TABLE_DATA_TAG])
+]
+
+
+def _filter_table(rows: List[Tag]) -> Dict[str, List[str]]:
+    """Make a col-based table is easier than row-base table."""
+    table_dict = {}
+
+    for (col_content,) in zip(_filter_row(row) for row in rows):
+        table_dict[col_content[0]] = col_content[1:]
+
+    return table_dict
+
+
+def _get_Tabular(article: BeautifulSoup) -> Dict[str, List]:
+    tables: Iterator[PageElement] = (table for table in article.find_all(_TABLE_TAG))
+
+    tabulars: Iterator[Dict[str, List[str]]] = (
+        _filter_table(table.find_all(_TABLE_ROW_TAG)) for table in tables
+    )
+
+    return {
+        "tabular": list(tabulars),
+    }
+
+
 class PubMedParser(baseParser):
-    _OPTIONS: List[Parameter | None] = [
-        Parameter("bsEncoding", kind=Parameter.KEYWORD_ONLY, default="xml"),
-    ]
+    _BS_ENCODING: str = "xml"
+    _TAG_ARTICLE: str = "article"
+
+    _OPTIONS: List[Parameter | None] = []
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.data = []
 
-    def parse(self, data: BeautifulSoup) -> None:
-        self._pre_parse()
-
-        self._parse(data)
-
-        self._post_parse()
+        self.data: List = []
+        self._pipeline: Callable[[BeautifulSoup], Dict] = None
 
     def _pre_parse(self) -> None:
+        self._max_processor: int = cpu_count()
         self.use_mp: bool = Gconfig.USE_MULTIPROCESSING
-        self.processor: int = int(Gconfig.USEABLE_PROCESSOR)
+        self.processor: int = (
+            min(Gconfig.USEABLE_PROCESSOR, self._max_processor)
+            if not Gconfig.USE_MAX_PROCESSOR
+            else self._max_processor
+        )
 
-        if self.use_mp and Gconfig.USE_MAX_PROCESSOR:
-            self.processor: int = mp.cpu_count()
+        self._pipeline: Callable[[BeautifulSoup], Dict] = self.assmPipeline(
+            _get_Meta,
+            _get_Body,
+            _get_Tabular,
+        )
 
-    def _parse(self, data: BeautifulSoup) -> None:
-        articles: Iterator[PageElement] = (
-            BeautifulSoup(str(a), self._default_options["bsEncoding"])
-            for a in data.find_all("article")
-        )  # This step is crucial. Due to PageElement is un-serializable.
+    def _parse(self, source: BeautifulSoup) -> None:
+        articles: Iterator[BeautifulSoup] = (
+            BeautifulSoup(str(article), self._BS_ENCODING)
+            for article in source.find_all(self._TAG_ARTICLE)
+        )  # Stringify and de-stringify the PageElement is crucial step.
 
-        if self.use_mp:
-            self._MpPipeline(articles)
-
+        if self._pipeline is not None:
+            if self.use_mp:
+                self.data = self._MpPipeline(self.processor, articles)
+            else:
+                self.data = self._LoopPipeline(articles)
         else:
-            self._LoopPipeline(articles)
+            raise ModuleError("Found no useable pipeline.")
 
     def _post_parse(self) -> None:
         """
         Do nothing after parsing.
         """
-
-    def _pipeline(self, article: PageElement) -> None:
-        ...
-
-    def _LoopPipeline(self, articles: Iterator) -> None:
-        for a in articles:
-            self._pipeline(a)
-
-    def _MpPipeline(self, articles: Iterator) -> None:
-        with mp.Pool(processes=self.processor) as pool:
-            pool.map(self._pipeline, articles)
