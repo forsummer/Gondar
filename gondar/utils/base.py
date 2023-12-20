@@ -53,7 +53,7 @@ class baseFetcher(baseModel):
         """
 
     @abstractmethod
-    def _fetch(self):
+    def _fetch(self, searchTerm: Any):
         """
         The actual fetch processing.
         """
@@ -104,7 +104,7 @@ class baseParser(baseModel):
         ...
 
     @abstractmethod
-    def _parse(self):
+    def _parse(self, source: Any):
         ...
 
     @abstractmethod
@@ -125,16 +125,21 @@ class basePublisher(baseModel):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    @abstractmethod
-    def publish(self):
-        ...
+        self.data = None
+
+    def publish(self, source: Any):
+        self._pre_publish()
+
+        self._publish(source)
+
+        self._post_publish()
 
     @abstractmethod
     def _pre_publish(self):
         ...
 
     @abstractmethod
-    def _publish(self):
+    def _publish(self, source: Any):
         ...
 
     @abstractmethod

@@ -1,13 +1,13 @@
 from inspect import Parameter
 from multiprocessing import cpu_count
-from typing import Callable, Dict, Iterator, List
+from typing import Any, Callable, Dict, Iterator, List, Literal
 
 from Bio import Entrez
 from bs4 import BeautifulSoup, PageElement, Tag
 
 from gondar.exception import EnviromentError, ModuleError
 from gondar.settings import Gconfig
-from gondar.utils.base import baseFetcher, baseParser
+from gondar.utils.base import baseFetcher, baseParser, basePublisher
 
 
 class PubMedFetcher(baseFetcher):
@@ -22,6 +22,7 @@ class PubMedFetcher(baseFetcher):
 
     # Use "pmc" instead of "pubmed" for fetching free full text.
     _DB: str = "pmc"
+    _BS_ENCODING: str = "xml"
     _EXTRACT_ID_TAG: str = "Id"
 
     # Ref to: https://www.ncbi.nlm.nih.gov/books/NBK25499/
@@ -65,9 +66,7 @@ class PubMedFetcher(baseFetcher):
             with Entrez.esearch(
                 db=self._DB, term=searchTerm, **self._default_options
             ) as handle:
-                searchResults = BeautifulSoup(
-                    handle.read(), self._default_options["retmode"]
-                )
+                searchResults = BeautifulSoup(handle.read(), self._BS_ENCODING)
 
                 id_set: List[str] = [
                     id_tag.text
@@ -90,6 +89,7 @@ class PubMedFetcher(baseFetcher):
     def _post_fetch(self) -> None:
         """
         Do nothing after fetching.
+        # TODO: May print some fetched example to let user confirm if everything OK.
         """
 
 
@@ -244,4 +244,43 @@ class PubMedParser(baseParser):
     def _post_parse(self) -> None:
         """
         Do nothing after parsing.
+        # TODO: May print some parsed example to let user confirm if everything OK.
         """
+
+
+class PubMedPublisher(basePublisher):
+    _VALID_PUBLISH_TYPES: List[str] = [
+        "csv",  # Human-readable tabular, lower volume fast IO.
+        "excel",  # Human-readable tabular, terrible choice.
+        "json",  # Json~
+        "feather",  # Col-based persistent storage, larger disk usage, faster IO
+        "parquet",  # Col-based persistent storage, lower disk usage, lower IO
+        "avro",  # Row-based persistent storage, higher efficience for dense writing of amounts of data
+    ]
+
+    _OPTIONS: List[Parameter | None] = [
+        Parameter("publish_type", kind=Parameter.KEYWORD_ONLY, default="parquet")
+    ]
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    def _pre_publish(self) -> None:
+        if self._default_options["publish_type"] in self._VALID_PUBLISH_TYPES:
+            self._publish_type: str = self._default_options["publish_type"]
+        else:
+            raise ModuleError(
+                f"Invalid publish type of {self._default_options['publish_type']}"
+            )
+
+    def _publish(self, source: List) -> None:
+        ...
+
+    def _post_publish(self) -> None:
+        ...
+
+    @classmethod
+    def _publish_dataframe(
+        cls,
+    ):
+        ...
