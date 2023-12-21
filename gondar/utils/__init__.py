@@ -5,17 +5,25 @@ from gondar.utils.base import (
     BasePublisher,
     GondarPydanticModel,
 )
-from gondar.utils.types import DEFAULT_FALSE, DEFAULT_TRUE, POS_INT, POS_NUM, STR
+from gondar.utils.types import (
+    DEFAULT_FALSE,
+    DEFAULT_TRUE,
+    POS_INT,
+    POS_NUM,
+    STR,
+    VALID_CHOICES,
+)
 
 __all__ = [
-    "GondarPydanticModel",
     "BaseFetcher",
     "BaseGondarModel",
     "BaseParser",
     "BasePublisher",
-    "STR",
-    "POS_INT",
-    "POS_NUM",
+    "GondarPydanticModel",
     "DEFAULT_FALSE",
     "DEFAULT_TRUE",
+    "POS_INT",
+    "POS_NUM",
+    "STR",
+    "VALID_CHOICES",
 ]

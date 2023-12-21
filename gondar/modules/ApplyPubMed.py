@@ -1,44 +1,49 @@
-from inspect import Parameter
 from multiprocessing import cpu_count
-from typing import Any, Callable, Dict, Iterator, List, Literal
+from typing import Callable, Dict, Iterator, List
 
 from Bio import Entrez
 from bs4 import BeautifulSoup, PageElement, Tag
+from pydantic import AfterValidator, Field
+from typing_extensions import Annotated
 
-from gondar.exception import EnviromentError, ModuleError
+from gondar.exception import ConfigError, ModuleError
 from gondar.settings import Gconfig
-from gondar.utils.base import baseFetcher, baseParser, basePublisher
+from gondar.utils import (
+    POS_INT,
+    STR,
+    VALID_CHOICES,
+    BaseFetcher,
+    BaseParser,
+    BasePublisher,
+    GondarPydanticModel,
+)
 
 
-class PubMedFetcher(baseFetcher):
+class PubMedFetcher(BaseFetcher):
     """
     Fast bulk fetch interested full text from PMC with Entrez.
 
-    NOTICE:
-    Must be provide an email within .env:
-
+    NOTICE:\n
+    Must be provide an email:\n
     EMAIL=example@mail.com
     """
 
     # Use "pmc" instead of "pubmed" for fetching free full text.
-    _DB: str = "pmc"
-    _BS_ENCODING: str = "xml"
-    _EXTRACT_ID_TAG: str = "Id"
+    DB: STR = "pmc"
+    BS_ENCODING: STR = "xml"
+    EXTRACT_ID_TAG: STR = "Id"
 
-    # Ref to: https://www.ncbi.nlm.nih.gov/books/NBK25499/
-    _ESEARCH_OPTIONS: List[Parameter | None] = [
-        Parameter("retstart", kind=Parameter.KEYWORD_ONLY, default=0),
-        Parameter("retmax", kind=Parameter.KEYWORD_ONLY, default=20),
-        Parameter("retmode", kind=Parameter.KEYWORD_ONLY, default="xml"),
-        Parameter("rettype", kind=Parameter.KEYWORD_ONLY, default="uilist"),
-        Parameter("sort", kind=Parameter.KEYWORD_ONLY, default="relevance"),
-        Parameter("datetype", kind=Parameter.KEYWORD_ONLY, default="pdat"),
-        Parameter("reldate", kind=Parameter.KEYWORD_ONLY, default=None),
-        Parameter("mindate", kind=Parameter.KEYWORD_ONLY, default=None),
-        Parameter("maxdate", kind=Parameter.KEYWORD_ONLY, default=None),
-    ]
-
-    _OPTIONS: List[Parameter | None] = _ESEARCH_OPTIONS
+    class Options(GondarPydanticModel):
+        # Ref to: https://www.ncbi.nlm.nih.gov/books/NBK25499/
+        restart: Annotated[POS_INT, Field(default=0)]
+        retmax: Annotated[POS_INT, Field(default=20)]
+        retmode: Annotated[STR, Field(default="xml")]
+        rettype: Annotated[STR, Field(default="uilist")]
+        sort: Annotated[STR, Field(default="relevance")]
+        datetype: Annotated[STR, Field(default="pdat")]
+        reldate: STR
+        mindate: STR
+        maxdate: STR
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -50,7 +55,9 @@ class PubMedFetcher(baseFetcher):
 
         Entrez.email: str | None = Gconfig.EMAIL
         if Entrez.email is None:
-            raise EnviromentError("Found no user email in ENVIRON for Entrez API!")
+            raise ConfigError(
+                "Found no user email in Global configuration for Entrez API!"
+            )
 
         Entrez.max_tries: int | None = Gconfig.MAX_RETRY
         Entrez.sleep_between_tries: int | None = Gconfig.RETRY_GAP
@@ -64,25 +71,21 @@ class PubMedFetcher(baseFetcher):
         # Esearch for related pmc id
         try:
             with Entrez.esearch(
-                db=self._DB, term=searchTerm, **self._default_options
+                db=self.DB, term=searchTerm, **dict(self.OPT)
             ) as handle:
-                searchResults = BeautifulSoup(handle.read(), self._BS_ENCODING)
+                searchResults = BeautifulSoup(handle.read(), self.BS_ENCODING)
 
                 id_set: List[str] = [
                     id_tag.text
-                    for id_tag in searchResults.find_all(self._EXTRACT_ID_TAG)
+                    for id_tag in searchResults.find_all(self.EXTRACT_ID_TAG)
                 ]
-
         except Exception as e:
             raise e
 
         # Efetch for full text
         try:
-            with Entrez.efetch(db=self._DB, id=id_set) as handle:
-                self.data = BeautifulSoup(
-                    handle.read(), self._default_options["retmode"]
-                )
-
+            with Entrez.efetch(db=self.DB, id=id_set) as handle:
+                self.data = BeautifulSoup(handle.read(), self.OPT.retmode)
         except Exception as e:
             raise e
 
@@ -188,23 +191,24 @@ def _filter_table(rows: List[Tag]) -> Dict[str, List[str]]:
     return table_dict
 
 
-def _get_Tabular(article: BeautifulSoup) -> Dict[str, List]:
+def _get_Tables(article: BeautifulSoup) -> Dict[str, List]:
     tables: Iterator[PageElement] = (table for table in article.find_all(_TABLE_TAG))
 
-    tabulars: Iterator[Dict[str, List[str]]] = (
+    f_tables: Iterator[Dict[str, List[str]]] = (
         _filter_table(table.find_all(_TABLE_ROW_TAG)) for table in tables
     )
 
     return {
-        "tabular": list(tabulars),
+        "tables": list(f_tables),
     }
 
 
-class PubMedParser(baseParser):
-    _BS_ENCODING: str = "xml"
-    _TAG_ARTICLE: str = "article"
+class PubMedParser(BaseParser):
+    BS_ENCODING: STR = "xml"
+    TAG_ARTICLE: STR = "article"
 
-    _OPTIONS: List[Parameter | None] = []
+    class Options(GondarPydanticModel):
+        ...
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -224,13 +228,13 @@ class PubMedParser(baseParser):
         self._pipeline: Callable[[BeautifulSoup], Dict] = self.assmPipeline(
             _get_Meta,
             _get_Body,
-            _get_Tabular,
+            _get_Tables,
         )
 
     def _parse(self, source: BeautifulSoup) -> None:
         articles: Iterator[BeautifulSoup] = (
-            BeautifulSoup(str(article), self._BS_ENCODING)
-            for article in source.find_all(self._TAG_ARTICLE)
+            BeautifulSoup(str(article), self.BS_ENCODING)
+            for article in source.find_all(self.TAG_ARTICLE)
         )  # Stringify and de-stringify the PageElement is crucial step.
 
         if self._pipeline is not None:
@@ -248,30 +252,24 @@ class PubMedParser(baseParser):
         """
 
 
-class PubMedPublisher(basePublisher):
-    _VALID_PUBLISH_TYPES: List[str] = [
-        "csv",  # Human-readable tabular, lower volume fast IO.
-        "excel",  # Human-readable tabular, terrible choice.
-        "json",  # Json~
-        "feather",  # Col-based persistent storage, larger disk usage, faster IO
-        "parquet",  # Col-based persistent storage, lower disk usage, lower IO
-        "avro",  # Row-based persistent storage, higher efficience for dense writing of amounts of data
-    ]
-
-    _OPTIONS: List[Parameter | None] = [
-        Parameter("publish_type", kind=Parameter.KEYWORD_ONLY, default="parquet")
-    ]
+class PubMedPublisher(BasePublisher):
+    class Options(GondarPydanticModel):
+        PUBLISTH_TYPE: Annotated[
+            STR,
+            AfterValidator(
+                VALID_CHOICES(["csv", "excel", "json", "feather", "parquet", "avro"])
+            ),
+            Field(default="csv"),
+        ]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
     def _pre_publish(self) -> None:
-        if self._default_options["publish_type"] in self._VALID_PUBLISH_TYPES:
-            self._publish_type: str = self._default_options["publish_type"]
+        if self.OPTIONS["publish_type"] in self._VALID_PUBLISH_TYPES:
+            self._publish_type: str = self.OPTIONS["publish_type"]
         else:
-            raise ModuleError(
-                f"Invalid publish type of {self._default_options['publish_type']}"
-            )
+            raise ModuleError(f"Invalid publish type of {self.OPTIONS['publish_type']}")
 
     def _publish(self, source: List) -> None:
         ...
