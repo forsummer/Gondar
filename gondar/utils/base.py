@@ -17,7 +17,7 @@ class GondarPydanticModel(BaseModel):
         if calling_frame.function == "__init__":
             super().__setattr__(__name, __value)
         else:
-            raise ConfigError("Gondar safe config is not allow to be modify.")
+            raise ConfigError(f"Gondar safe config {__name} is not allow to be modify.")
 
 
 class BaseGondarModel(object):
