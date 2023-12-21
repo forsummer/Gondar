@@ -1,37 +1,41 @@
 import multiprocessing as mp
 from abc import abstractmethod
-from inspect import Parameter
+from inspect import stack as InspectStack
 from typing import Any, Callable, Dict, Iterator, List
 
+from pydantic import BaseModel
 
-class baseModel(object):
-    _OPTIONS: List[Parameter | None] = []
+from gondar.exception import ConfigError
+
+
+class GondarPydanticModel(BaseModel):
+    class Config:
+        validate_assignment = True
+
+    def __setattr__(self, __name: str, __value: Any) -> None:
+        calling_frame = InspectStack()[1]
+        if calling_frame.function == "__init__":
+            super().__setattr__(__name, __value)
+        else:
+            raise ConfigError("Gondar safe config is not allow to be modify.")
+
+
+class BaseGondarModel(object):
+    class Options(GondarPydanticModel):
+        ...
 
     def __init__(self, **kwargs) -> None:
-        self._default_options: Dict[str, Any] = self.add_default_options()
-
-        # Safely update outsource args
-        self.reset_default_options(**kwargs)
+        self.OPT = self.__set_options(**kwargs)
 
         self.data: Any = None
 
-    def add_default_options(cls):
-        _options = cls._OPTIONS
-
-        return (
-            {arg.name: arg.default for arg in _options} if _options is not None else {}
-        )
-
-    def reset_default_options(self, **kwargs):
-        updated_options = set(self._default_options.keys()) & set(kwargs.keys())
-        if updated_options is not None:
-            self._default_options.update(
-                {k: v for k, v in kwargs.items() if k in updated_options}
-            )
+    def __set_options(cls, **kwargs):
+        return cls.Options(**kwargs)
 
 
-class baseFetcher(baseModel):
-    _OPTIONS: List[Parameter | None] = []
+class BaseFetcher(BaseGondarModel):
+    class Options(GondarPydanticModel):
+        ...
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -71,8 +75,9 @@ class baseFetcher(baseModel):
         ...
 
 
-class baseParser(baseModel):
-    _OPTIONS: List[Parameter | None] = []
+class BaseParser(BaseGondarModel):
+    class Options(GondarPydanticModel):
+        ...
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -119,8 +124,9 @@ class baseParser(baseModel):
             return pool.map(self._pipeline, sourceIter)
 
 
-class basePublisher(baseModel):
-    _OPTIONS: List[Parameter | None] = []
+class BasePublisher(BaseGondarModel):
+    class Options(GondarPydanticModel):
+        ...
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
