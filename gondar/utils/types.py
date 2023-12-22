@@ -20,7 +20,7 @@ DEFAULT_FALSE = Annotated[bool, Field(default=False, kw_only=True)]
 # Validate choice
 class VALID_CHOICES:
     def __init__(self, *choices) -> None:
-        self._choices = list(choices[0])
+        self._choices = list(choices)
 
     def __call__(self, choice: Any) -> Any:
         if choice in self._choices:

@@ -263,15 +263,13 @@ class PubMedPublisher(BasePublisher):
             STR,
             AfterValidator(
                 VALID_CHOICES(
-                    [
-                        "dataframe",  # Pickled dataframe
-                        "csv",  # Human-readable table, lower disk usage faster rw
-                        "excel",  # Human-readable table, higher disk usage lower rw
-                        "json",  # JSON is good
-                        "feather",  # Col-based persistent storage.
-                        "parquet",  # Col-based persistent storage.
-                        "avro",  # Row-based persistent storage.
-                    ]
+                    "dataframe",  # Pickled dataframe
+                    "csv",  # Human-readable table, lower disk usage faster rw
+                    "excel",  # Human-readable table, higher disk usage lower rw
+                    "json",  # JSON is good
+                    "feather",  # Col-based persistent storage.
+                    "parquet",  # Col-based persistent storage.
+                    "avro",  # Row-based persistent storage.
                 )
             ),
             Field(default="dataframe"),
