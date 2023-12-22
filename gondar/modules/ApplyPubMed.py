@@ -1,8 +1,9 @@
 from multiprocessing import cpu_count
-from typing import Callable, Dict, Iterator, List
+from typing import Any, Callable, Dict, Iterator, List, Literal
 
+import polars as pl
 from Bio import Entrez
-from bs4 import BeautifulSoup, PageElement, Tag
+from bs4 import BeautifulSoup
 from pydantic import AfterValidator, Field
 from typing_extensions import Annotated
 
@@ -19,6 +20,18 @@ from gondar.utils import (
 )
 
 
+def removeAllAttrs(soup: BeautifulSoup):
+    """
+    Recursively remove all attributes. \n
+    This step is crucial for saving tokens usage (and your dollars).
+    """
+    if hasattr(soup, "attrs"):
+        soup.attrs = {}
+    if hasattr(soup, "contents"):
+        for child in soup.contents:
+            removeAllAttrs(child)
+
+
 class PubMedFetcher(BaseFetcher):
     """
     Fast bulk fetch interested full text from PMC with Entrez.
@@ -28,7 +41,6 @@ class PubMedFetcher(BaseFetcher):
     EMAIL=example@mail.com
     """
 
-    # Use "pmc" instead of "pubmed" for fetching free full text.
     DB: STR = "pmc"
     BS_ENCODING: STR = "xml"
     EXTRACT_ID_TAG: STR = "Id"
@@ -96,39 +108,19 @@ class PubMedFetcher(BaseFetcher):
         """
 
 
-(
-    _ARTICLE_TITLE_TAG,
-    _JOURNAL_TITLE_TAG,
-    _ARTICLE_ID_TAG,
-    _PUBDATE_TAG,
-    _SECTION_TAG,
-    _TABLE_TAG,
-    _TABLE_ROW_TAG,
-    _TABLE_HEAD_TAG,
-    _TABLE_DATA_TAG,
-) = (
-    "article-title",
-    "journal-title",
-    "article-id",
-    "pub-date",
-    "sec",
-    "table",
-    "tr",
-    "th",
-    "td",
-)
+_ARTICLE_TITLE_TAG: Literal["article-title"] = "article-title"
+_JOURNAL_TITLE_TAG: Literal["journal-title"] = "journal-title"
+_ARTICLE_ID_TAG: Literal["article-id"] = "article-id"
+_PUBDATE_TAG: Literal["pub-date"] = "pub-date"
+_SECTION_TAG: Literal["sec"] = "sec"
+_TABLE_TAG: Literal["table-wrap"] = "table-wrap"
 
-(
-    _BLANK_LINKER,
-    _SPACE_LINKER,
-    _SLASH_LINKER,
-) = (
-    "",
-    " ",
-    "/",
-)
+_BLANK_LINKER: Literal[""] = ""
+_SPACE_LINKER: Literal[" "] = " "
+_SLASH_LINKER: Literal["/"] = "/"
 
-_filter_meta: Callable[[Tag | None, str], str] = (
+
+_filter_meta: Callable[[BeautifulSoup | None, str], str] = (
     lambda content, linker: linker.join(content.stripped_strings)
     if content is not None
     else ""
@@ -161,7 +153,7 @@ def _get_Meta(article: BeautifulSoup) -> Dict[str, str]:
 
 
 def _get_Body(article: BeautifulSoup) -> Dict[str, List]:
-    sections: Iterator[PageElement] = (
+    sections: Iterator[BeautifulSoup] = (
         section for section in article.find_all(_SECTION_TAG)
     )
 
@@ -175,31 +167,16 @@ def _get_Body(article: BeautifulSoup) -> Dict[str, List]:
     }
 
 
-_filter_row: Callable[[Tag | None], List[str]] = lambda row: [
-    _SPACE_LINKER.join(content.stripped_strings)
-    for content in row.find_all([_TABLE_HEAD_TAG, _TABLE_DATA_TAG])
-]
-
-
-def _filter_table(rows: List[Tag]) -> Dict[str, List[str]]:
-    """Make a col-based table is easier than row-base table."""
-    table_dict = {}
-
-    for (col_content,) in zip(_filter_row(row) for row in rows):
-        table_dict[col_content[0]] = col_content[1:]
-
-    return table_dict
-
-
 def _get_Tables(article: BeautifulSoup) -> Dict[str, List]:
-    tables: Iterator[PageElement] = (table for table in article.find_all(_TABLE_TAG))
+    tables: Iterator[BeautifulSoup] = (table for table in article.find_all(_TABLE_TAG))
 
-    f_tables: Iterator[Dict[str, List[str]]] = (
-        _filter_table(table.find_all(_TABLE_ROW_TAG)) for table in tables
-    )
+    unwraped_tables: List[str] = []
+    for t in tables:
+        removeAllAttrs(t)
+        unwraped_tables.append(str(t))
 
     return {
-        "tables": list(f_tables),
+        "tables": unwraped_tables,
     }
 
 
@@ -252,33 +229,74 @@ class PubMedParser(BaseParser):
         """
 
 
+def _publish_dataframe(source: List[Dict]):
+    return pl.DataFrame(source)
+
+
+def _publish_csv(source: List[Dict]):
+    ...
+
+
+def _publish_excel(source: List[Dict]):
+    ...
+
+
+def _publish_json(source: List[Dict]):
+    ...
+
+
+def _publish_feather(source: List[Dict]):
+    ...
+
+
+def _publish_parquet(source: List[Dict]):
+    ...
+
+
+def _publish_avro(source: List[Dict]):
+    ...
+
+
 class PubMedPublisher(BasePublisher):
     class Options(GondarPydanticModel):
         PUBLISTH_TYPE: Annotated[
             STR,
             AfterValidator(
-                VALID_CHOICES(["csv", "excel", "json", "feather", "parquet", "avro"])
+                VALID_CHOICES(
+                    [
+                        "dataframe",  # Pickled dataframe
+                        "csv",  # Human-readable table, lower disk usage faster rw
+                        "excel",  # Human-readable table, higher disk usage lower rw
+                        "json",  # JSON is good
+                        "feather",  # Col-based persistent storage.
+                        "parquet",  # Col-based persistent storage.
+                        "avro",  # Row-based persistent storage.
+                    ]
+                )
             ),
-            Field(default="csv"),
+            Field(default="dataframe"),
         ]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
     def _pre_publish(self) -> None:
-        if self.OPTIONS["publish_type"] in self._VALID_PUBLISH_TYPES:
-            self._publish_type: str = self.OPTIONS["publish_type"]
-        else:
-            raise ModuleError(f"Invalid publish type of {self.OPTIONS['publish_type']}")
+        self._register_methods: Dict[str, Callable[[List], Any]] = {
+            "dataframe": _publish_dataframe,
+            "csv": _publish_csv,
+            "excel": _publish_excel,
+            "json": _publish_json,
+            "feather": _publish_feather,
+            "parquet": _publish_parquet,
+            "avro": _publish_avro,
+        }
+        self._publish_method = self._get_method(self.OPT.PUBLISTH_TYPE)
 
     def _publish(self, source: List) -> None:
-        ...
+        self.data = self._publish_method(source)
 
     def _post_publish(self) -> None:
         ...
 
-    @classmethod
-    def _publish_dataframe(
-        cls,
-    ):
-        ...
+    def _get_method(self, method_name: str) -> Callable:
+        return self._register_methods[method_name]
