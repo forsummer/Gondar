@@ -157,3 +157,38 @@ class BasePublisher(BaseGondarModel):
 
     async def _apublish(self):
         ...
+
+
+class BaseChain(BaseGondarModel):
+    class Options(GondarPydanticModel):
+        ...
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+        self.data = None
+
+    def runChain(self, source: Any):
+        self._pre_run()
+
+        self._run(source)
+
+        self._post_run()
+
+    @abstractmethod
+    def _pre_run(self):
+        ...
+
+    @abstractmethod
+    def _run(self, source: Any):
+        ...
+
+    @abstractmethod
+    def _post_run(self):
+        ...
+
+    async def arunChain(self, source: Any):
+        ...
+
+    async def _arun(self, source: Any):
+        ...

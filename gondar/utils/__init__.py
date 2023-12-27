@@ -1,4 +1,5 @@
 from gondar.utils.base import (
+    BaseChain,
     BaseFetcher,
     BaseGondarModel,
     BaseParser,
@@ -15,6 +16,7 @@ from gondar.utils.types import (
 )
 
 __all__ = [
+    "BaseChain",
     "BaseFetcher",
     "BaseGondarModel",
     "BaseParser",

@@ -1,9 +1,9 @@
 from multiprocessing import cpu_count
 from typing import Any, Callable, Dict, Iterator, List, Literal
 
-import polars as pl
 from Bio import Entrez
 from bs4 import BeautifulSoup
+from openai import AzureOpenAI
 from pydantic import AfterValidator, Field
 from typing_extensions import Annotated
 
@@ -13,6 +13,7 @@ from gondar.utils import (
     POS_INT,
     STR,
     VALID_CHOICES,
+    BaseChain,
     BaseFetcher,
     BaseParser,
     BasePublisher,
@@ -229,72 +230,85 @@ class PubMedParser(BaseParser):
         """
 
 
-def _publish_dataframe(source: List[Dict]):
-    return pl.DataFrame(source)
-
-
-def _publish_csv(source: List[Dict]):
-    ...
-
-
-def _publish_excel(source: List[Dict]):
-    ...
-
-
-def _publish_json(source: List[Dict]):
-    ...
-
-
-def _publish_feather(source: List[Dict]):
-    ...
-
-
-def _publish_parquet(source: List[Dict]):
-    ...
-
-
-def _publish_avro(source: List[Dict]):
-    ...
-
-
-class PubMedPublisher(BasePublisher):
+class PubMedChain(BaseChain):
     class Options(GondarPydanticModel):
-        PUBLISTH_TYPE: Annotated[
+        llm: Annotated[
             STR,
             AfterValidator(
                 VALID_CHOICES(
-                    "dataframe",  # Pickled dataframe
-                    "csv",  # Human-readable table, lower disk usage faster rw
-                    "excel",  # Human-readable table, higher disk usage lower rw
-                    "json",  # JSON is good
-                    "feather",  # Col-based persistent storage.
-                    "parquet",  # Col-based persistent storage.
-                    "avro",  # Row-based persistent storage.
+                    "azure",
                 )
             ),
-            Field(default="dataframe"),
+            Field(default="azure"),
+        ]
+        embedding: Annotated[
+            STR,
+            AfterValidator(
+                VALID_CHOICES(
+                    "azure",
+                )
+            ),
+            Field(default=None),
         ]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def _pre_publish(self) -> None:
-        self._register_methods: Dict[str, Callable[[List], Any]] = {
-            "dataframe": _publish_dataframe,
-            "csv": _publish_csv,
-            "excel": _publish_excel,
-            "json": _publish_json,
-            "feather": _publish_feather,
-            "parquet": _publish_parquet,
-            "avro": _publish_avro,
-        }
-        self._publish_method = self._get_method(self.OPT.PUBLISTH_TYPE)
+        self.data: List = []
 
-    def _publish(self, source: List) -> None:
-        self.data = self._publish_method(source)
+    def _pre_run(self):
+        self.client = AzureOpenAI(
+            azure_endpoint=...,
+            azure_deployment=...,
+            api_version=...,
+            api_key=...,
+            timeout=...,
+            max_retries=...,
+        )
 
-    def _post_publish(self) -> None:
+    def _run(self, target: str, source: List[Dict]):
+        self.table_heads = self._chain1(target)
+
+        self.data = map(self._chain2, source)
+
+    def _post_run(self):
         ...
 
-    def _get_method(self, method_name: str) -> Callable:
-        return self._register_methods[method_name]
+    def _chain1(self, target: str):
+        client = AzureOpenAI(
+            azure_endpoint=...,
+            azure_deployment=...,
+            api_version=...,
+            api_key=...,
+            timeout=...,
+            max_retries=...,
+        )
+        completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": ...,
+                },
+                {
+                    "role": "user",
+                    "content": "How do I output all files in a directory using Python?",
+                },
+            ],
+        )
+
+        return completion
+
+    def _chain2(self, source: Dict):
+        heads = self.table_heads
+        completion = self.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": ...,
+                },
+                {
+                    "role": "user",
+                    "content": "How do I output all files in a directory using Python?",
+                },
+            ],
+        )

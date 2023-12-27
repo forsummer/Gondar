@@ -46,7 +46,26 @@ class _PerformanceConfig(GondarPydanticModel):
     USEABLE_THREADS: Annotated[POS_INT, Field(default=1)]
 
 
+class _LLMConfig(GondarPydanticModel):
+    """
+    LLM configuration
+    """
+
+    # OpenAI
+
+    # AzureOpenAI
+    AZURE_ENDPOINT: Annotated[STR, Field(default=None)]
+    AZURE_DEPLOYMENT: Annotated[STR, Field(default=None)]
+    AZURE_API_KEY: Annotated[STR, Field(default=None)]
+    AZURE_API_VERSION: Annotated[STR, Field(default=None)]
+
+
 GondarGlobalConfig = create_model(
     "GondarGlobalConfig",
-    __base__=(_IdentityConfig, _NetworkConfig, _PerformanceConfig),
+    __base__=(
+        _IdentityConfig,
+        _NetworkConfig,
+        _PerformanceConfig,
+        _LLMConfig,
+    ),
 )

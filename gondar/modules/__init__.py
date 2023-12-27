@@ -1,3 +1,7 @@
-from gondar.modules import ApplyPubMed
+from gondar.modules.ApplyPubMed import PubMedChain, PubMedFetcher, PubMedParser
 
-__all__ = ["ApplyPubMed"]
+__all__ = [
+    "PubMedChain",
+    "PubMedFetcher",
+    "PubMedParser",
+]
