@@ -54,9 +54,9 @@ class _LLMConfig(GondarPydanticModel):
     # OpenAI
 
     # AzureOpenAI
-    AZURE_ENDPOINT: Annotated[STR, Field(default=None)]
+    AZURE_OPENAI_ENDPOINT: Annotated[STR, Field(default=None)]
+    AZURE_OPENAI_KEY: Annotated[STR, Field(default=None)]
     AZURE_DEPLOYMENT: Annotated[STR, Field(default=None)]
-    AZURE_API_KEY: Annotated[STR, Field(default=None)]
     AZURE_API_VERSION: Annotated[STR, Field(default=None)]
 
 
