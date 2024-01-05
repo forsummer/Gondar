@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from gondar.exception import ConfigError
 
 
-class GondarPydanticModel(BaseModel):
+class GondarConfigModel(BaseModel):
     class Config:
         validate_assignment = True
 
@@ -21,7 +21,7 @@ class GondarPydanticModel(BaseModel):
 
 
 class BaseGondarModel(object):
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         ...
 
     def __init__(self, **kwargs) -> None:
@@ -34,7 +34,7 @@ class BaseGondarModel(object):
 
 
 class BaseFetcher(BaseGondarModel):
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         ...
 
     def __init__(self, **kwargs) -> None:
@@ -76,7 +76,7 @@ class BaseFetcher(BaseGondarModel):
 
 
 class BaseParser(BaseGondarModel):
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         ...
 
     def __init__(self, **kwargs) -> None:
@@ -125,7 +125,7 @@ class BaseParser(BaseGondarModel):
 
 
 class BasePublisher(BaseGondarModel):
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         ...
 
     def __init__(self, **kwargs) -> None:
@@ -160,7 +160,7 @@ class BasePublisher(BaseGondarModel):
 
 
 class BaseChain(BaseGondarModel):
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         ...
 
     def __init__(self, **kwargs) -> None:

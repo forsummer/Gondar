@@ -4,7 +4,7 @@ from gondar.utils.base import (
     BaseGondarModel,
     BaseParser,
     BasePublisher,
-    GondarPydanticModel,
+    GondarConfigModel,
 )
 from gondar.utils.types import (
     DEFAULT_FALSE,
@@ -21,7 +21,7 @@ __all__ = [
     "BaseGondarModel",
     "BaseParser",
     "BasePublisher",
-    "GondarPydanticModel",
+    "GondarConfigModel",
     "DEFAULT_FALSE",
     "DEFAULT_TRUE",
     "POS_INT",

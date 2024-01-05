@@ -1,10 +1,10 @@
 from pydantic import Field, create_model
 from typing_extensions import Annotated
 
-from gondar.utils import DEFAULT_FALSE, POS_INT, POS_NUM, STR, GondarPydanticModel
+from gondar.utils import DEFAULT_FALSE, POS_INT, POS_NUM, STR, GondarConfigModel
 
 
-class _IdentityConfig(GondarPydanticModel):
+class _IdentityConfig(GondarConfigModel):
     """
     Identity configuration.
     """
@@ -13,7 +13,7 @@ class _IdentityConfig(GondarPydanticModel):
     EMAIL: Annotated[STR, Field(default=None, examples=["explorer@email.com"])]
 
 
-class _NetworkConfig(GondarPydanticModel):
+class _NetworkConfig(GondarConfigModel):
     """
     Network configuration
     """
@@ -31,7 +31,7 @@ class _NetworkConfig(GondarPydanticModel):
     FTP_PROXY: Annotated[STR, Field(default=None, examples=["ftp://127.0.0.1:7892"])]
 
 
-class _PerformanceConfig(GondarPydanticModel):
+class _PerformanceConfig(GondarConfigModel):
     """
     Performance configuration
     """
@@ -46,7 +46,7 @@ class _PerformanceConfig(GondarPydanticModel):
     USEABLE_THREADS: Annotated[POS_INT, Field(default=1)]
 
 
-class _LLMConfig(GondarPydanticModel):
+class _LLMConfig(GondarConfigModel):
     """
     LLM configuration
     """
