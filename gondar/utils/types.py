@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 from pydantic import Field
 from typing_extensions import Annotated
@@ -15,6 +15,9 @@ POS_NUM = Annotated[Union[int, float], Field(gt=0, kw_only=True)]
 # Bool
 DEFAULT_TRUE = Annotated[bool, Field(default=True, kw_only=True)]
 DEFAULT_FALSE = Annotated[bool, Field(default=False, kw_only=True)]
+
+VALID: Literal["valid"] = "valid"
+INVALID: Literal["invalid"] = "invalid"
 
 
 # Validate choice

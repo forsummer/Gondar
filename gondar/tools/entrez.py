@@ -1,15 +1,14 @@
 """Util that calls PubMed Entrez."""
 import logging
-from typing import Any, Callable, Dict, Generator, List, Literal
+from typing import Callable, Dict, Generator, List
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ValidationError, model_validator
 
 from gondar import Gconfig
-from gondar.utils.types import POS_INT, STR
+from gondar.utils.types import POS_INT, STR, VALID
 
 logger = logging.getLogger(__name__)
-VALID: Literal["valid"] = "valid"
 
 filter_meta: Callable[[BeautifulSoup | None, str], str] = (
     lambda content, linker: linker.join(content.stripped_strings)
