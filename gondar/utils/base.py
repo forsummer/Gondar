@@ -8,6 +8,11 @@ from pydantic import BaseModel
 from gondar.exception import ConfigError
 
 
+class GondarModel(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class GondarConfigModel(BaseModel):
     class Config:
         validate_assignment = True
