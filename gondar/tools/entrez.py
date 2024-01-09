@@ -21,8 +21,8 @@ def get_Meta(article: BeautifulSoup) -> Dict[str, str]:
     """Get metadata from soup"""
 
     return {
-        "article": filter_meta(article.find("article-title"), ""),
-        "journal": filter_meta(article.find("journal-title"), ""),
+        "article": filter_meta(article.find("article-title"), " "),
+        "journal": filter_meta(article.find("journal-title"), " "),
         "doi": filter_meta(
             article.find("article-id", attrs={"pub-id-type": "doi"}), ""
         ),
