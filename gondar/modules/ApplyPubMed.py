@@ -17,7 +17,7 @@ from gondar.utils import (
     BaseFetcher,
     BaseParser,
     BasePublisher,
-    GondarPydanticModel,
+    GondarConfigModel,
 )
 
 
@@ -46,7 +46,7 @@ class PubMedFetcher(BaseFetcher):
     BS_ENCODING: STR = "xml"
     EXTRACT_ID_TAG: STR = "Id"
 
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         # Ref to: https://www.ncbi.nlm.nih.gov/books/NBK25499/
         restart: Annotated[POS_INT, Field(default=0)]
         retmax: Annotated[POS_INT, Field(default=20)]
@@ -185,7 +185,7 @@ class PubMedParser(BaseParser):
     BS_ENCODING: STR = "xml"
     TAG_ARTICLE: STR = "article"
 
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         ...
 
     def __init__(self, **kwargs) -> None:
@@ -231,7 +231,7 @@ class PubMedParser(BaseParser):
 
 
 class PubMedChain(BaseChain):
-    class Options(GondarPydanticModel):
+    class Options(GondarConfigModel):
         llm: Annotated[
             STR,
             AfterValidator(

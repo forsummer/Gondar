@@ -10,6 +10,7 @@ STR = Annotated[str, Field(default=None, kw_only=True)]
 
 # Number
 POS_INT = Annotated[int, Field(gt=0, kw_only=True)]
+POS_FLOAT = Annotated[float, Field(gt=0, kw_only=True)]
 POS_NUM = Annotated[Union[int, float], Field(gt=0, kw_only=True)]
 
 # Bool
