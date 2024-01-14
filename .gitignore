@@ -161,3 +161,4 @@ cython_debug/
 
 # local cache
 .local/
+.vscode/

@@ -35,7 +35,7 @@ class BaseError(Exception):
         return self.__msg
 
 
-class EnviromentError(BaseError):
+class ConfigError(BaseError):
     """
     Enviroment exception.
     """
