@@ -1,6 +1,7 @@
 """Util that calls PubMed Entrez."""
 import logging
-from typing import Callable, Dict, Generator, List
+from copy import deepcopy
+from typing import Callable, Dict, Generator, Iterator, List
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ValidationError, model_validator
@@ -35,9 +36,15 @@ def get_Meta(article: BeautifulSoup) -> Dict[str, str]:
 def get_Body(article: BeautifulSoup) -> Dict[str, List]:
     """Get body text from soup"""
 
-    sections: Generator[BeautifulSoup] = (
-        section for section in article.find_all("sec")
+    article_cp = deepcopy(article)
+
+    sections: List[BeautifulSoup] = list(
+        section for section in article_cp.find_all("sec")
     )
+
+    for sec in sections:
+        for table_wrap in sec.find_all("table-wrap"):
+            table_wrap.decompose()
 
     section_contents: Generator[str] = (
         " ".join(section.stripped_strings) if section is not None else ""
