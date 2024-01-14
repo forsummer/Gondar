@@ -1,10 +1,44 @@
-from abc import abstractmethod
-from typing import Annotated, Any, Callable, Dict, Generator, Iterator, List, Literal
+"""
+Document Structuring Workflow Based on PubMed Data
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+---------------------------------
+
+The scripts should be included following models:\n
+
+1. Tools: The Interface of External API or Function,
+such as entrez (Network access interface for external resources)
+and Aliyun function computation. \n
+
+2. Document: The data model coming from Tools.
+
+3. PromptTemplate: The string template that use for organize the prompt.
+
+4. Messages: The data model sending to Agent (LLM).
+
+5. Agent: LLM interface.
+
+6. Parser: The data (processing) model that parsering the coming data from Agent (LLM).
+
+7. Callback: Various plug-and-play callback models,
+such as the callback model for recording Tokens Usage
+or the callback model for interacting with the frontend.
+
+8. Memory: A model for interfacing with databases,
+which may include but is not limited to Memory, Redis, or databases like Postgre, Mongo, etc.
+Used to provide the model with cached, persistent memory, or historical records.
+
+---------------------------------
+
+Combining the above models into a workflow (Flow) model.
+This Flow model will directly provide interfaces for external access.
+
+"""
+
+from typing import Any, Dict, Generator, List, Literal
+
+from pydantic import BaseModel, model_validator
 
 from gondar import Gconfig
-from gondar.utils.Message import Message
 from gondar.utils.types import POS_FLOAT, POS_INT, STR, VALID
 
 
@@ -13,7 +47,17 @@ class GondarModel(BaseModel):
         arbitrary_types_allowed = True
 
 
+class Message(GondarModel):
+    role: str
+    content: str
+
+
 class AzureOpenAIWrapper(GondarModel):
+    """
+    Azure OpenAI API Document: \n
+    https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/json-mode?tabs=python
+    """
+
     client: Any = None
 
     azure_openai_endpoint: STR
@@ -61,11 +105,6 @@ class AzureOpenAIWrapper(GondarModel):
         )
 
 
-class Message(GondarModel):
-    role: str
-    content: str
-
-
 class MessageTemplate(GondarModel):
     role: str
     template: str
@@ -91,45 +130,47 @@ class MessagesWrapper(GondarModel):
 
 
 if __name__ == "__main__":
-    from tokenizers import Tokenizer
-
-    tokenizer = Tokenizer.from_pretrained("bert-base-uncased")
-
     import json
 
     import polars as pl
 
     from gondar.tools import EntrezAPIWrapper
 
+    # NOTE: Model Tools (Interface Model of External API or Function)
     entrez = EntrezAPIWrapper(retmax=3)
+
+    # NOTE: Model Document (Retrieved External Document Model)
     data = entrez.load("(Chlamydomonas reinhardtii) AND (Terpene)")
 
-    # Each Requirement is fucking crucial.
+    # NOTE: Model PromptTemplate (The Template Model of Prompt)
+    # Each Requirement is fucking crucial. Don't even move a char.
     helpful_assistant: Dict[str, str] = {
         "role": "system",
         "template": """
         You are an intelligent research assistant.
 
-        Your tasks:
+        Your thought process:
         * Understand the user's motivation.
-        * Select one of your abilities required for analyzing each type of header.
-        * Retrieve relevant information based on the provided headers and corresponding descriptions.
-        * Organize into a concise, tidy structured data table.
+        * Self-ask: Is there sufficient content reported in reference text?
+        * Self-ask: Does the content type match the header type (within the brackets)?"
+        * Find reference text that satisfy all headers and then organize corresponding rows from these reference paragraphs.
+        * Organize the row one by one into a concise, tidy structured data list.
         
-        Present the table as a JSON:
+        Present the list as JSON object:
         {{ 
             headers: [header1, header2, ...],
+            satisfy: [Yes/No, Yes/No, ...],
             data: {{row1: [column1, column2, ...], row2: [column1, column2, ...], ...}}
         }}
         
         Requirements:
         * You pay thorough attention to the entire reference text.
-        * Your output information should be sourced directly from the provided reference text, DO NOT make any modifications or alterations.
-        * You drop the table if any header is being evaluate as 'unsatisfactory'.
-        * You should explode the table to prevent too much information in the same row.
+        * Your output content should be sourced directly from the provided reference text without any modifications.
+        * You evaluate whether the content of the reference text satisfies all headers. If it doesn't meet any header, you return an empty list.
+        * You cannot return any content that could be defined as 'Not specified'.
+        * You should explode the list to prevent too much content in the same row.
         * You must ensure consistent column count for each row.
-        * You DO NOT output the description of headers.
-        * DO NOT output '\\n'.
+        * You output content without '\\n'.
         """,
     }
 
@@ -139,10 +180,10 @@ if __name__ == "__main__":
         Motivation:
         {motivation}
         
-        Refrence Text:
+        You should find reference paragraphs that meet my motivation from the following all reference text:
         {reference}
         
-        Headers:
+        You should find content that satisfies the following all headers:
         {heads}
         
         Take a deep breath, remember all your tasks, and all Requirements.
@@ -150,35 +191,37 @@ if __name__ == "__main__":
         """,
     }
 
+    self_check: Dict[str, str] = {
+        "role": "assistant",
+        "template": """     
+        Let me carefully check if the reference text contains the content required by the headers {heads}.
+        If not satisfied, then satisfy is 'No'; if satisfied, satisfy will be 'Yes'.
+        
+        I will finish all my tasks with all your requirement. Here is the prefectest list print as JSON:
+        """,
+    }
+
     templates: List[MessageTemplate] = [
         MessageTemplate(**helpful_assistant),
         MessageTemplate(**text_extract),
+        MessageTemplate(**self_check),
     ]
+
+    # NOTE: Model Messages (The Messages Model, adapting to the Agent Model)
     messagesWrapper = MessagesWrapper(template_store=templates)
 
     heads = [
-        "Engineered strains. Description: An exact Name or ID.",
-        "Terpenes Types. Description: Types name or ID.",
-        "Terpenes Production. Description: A production values.",
-        "Key Protocol. Description: A brief about the key protocol.",
+        "Engineered strains (Named Entity)",
+        "Terpenes Types (Named Entity)",
+        "Terpenes Production (Values / Unit)",
+        "Protocol (Brief)",
     ]
 
     motivation = """
     Retrieve engineered strain of Chlamydomonas reinhardtii and the production of any types of terpenes.
     """
 
-    body = "\n\n".join(data[0]["body"])
-
-    splitted = tokenizer.encode(body)
-
-    def messages_iter():
-        for i in range(0, len(splitted), 40_000):
-            yield messagesWrapper.generate(
-                reference=tokenizer.decode(splitted.ids[i : i + 40_000]),
-                heads=heads,
-                motivation=motivation,
-            )
-
+    # NOTE: Model Agent (The Agent model, an interface of LLM)
     llm = AzureOpenAIWrapper(
         azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
         azure_deployment=Gconfig.AZURE_DEPLOYMENT,
@@ -186,17 +229,18 @@ if __name__ == "__main__":
         model="gpt-4-1106-preview",
     )
 
-    print(data[1]["article"])
-    for body in data[1]["body"]:
+    print(data[0]["article"])
+    for body in data[0]["body"]:
         mes = messagesWrapper.generate(
             reference=body,
             heads=heads,
             motivation=motivation,
         )
 
-        r = llm.invoke(mes)
-        print(r.usage)
-        c = r.choices[0].message.content.strip()
+        # NOTE: Model Parser (The output parser that parsering the responese from LLM to constructured format)
+        res = llm.invoke(mes)
+        print(res.usage)
+        c = res.choices[0].message.content.strip()
         cd = json.loads(c)
         print(c)
         if cd["data"] != {}:
@@ -205,16 +249,3 @@ if __name__ == "__main__":
             print(df)
 
             print("\n")
-
-    # for mes in messages_iter():
-    #     r = llm.invoke(mes)
-    #     print(r.usage)
-    #     c = r.choices[0].message.content.strip()
-    #     cd = json.loads(c)
-    #     print(c)
-    #     if cd["data"] != {}:
-    #         df = pl.DataFrame(data=cd["data"]).transpose()
-    #         df = df.rename(dict(zip(df.columns, cd["headers"])))
-    #         print(df)
-
-    #         print("\n")
