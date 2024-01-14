@@ -25,11 +25,10 @@ class AzureOpenAIWrapper(GondarModel):
         "gpt-4-1106-preview", "gpt-35-turbo-1106"
     ] = "gpt-4-1106-preview"  # Since 12/07/2023
     response_format: Dict = {"type": "json_object"}
-    temperature: POS_FLOAT = 0.2
-    max_tokens: POS_INT = 4_000
+    temperature: POS_FLOAT = 0.0
 
     max_retries: POS_INT = 2  # times
-    timeout: POS_INT = 120  # seconds
+    timeout: POS_INT = 300  # seconds
 
     @model_validator(mode="before")
     @classmethod
@@ -58,7 +57,7 @@ class AzureOpenAIWrapper(GondarModel):
             model=self.model,
             response_format=self.response_format,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            seed=1001,
         )
 
 
@@ -78,11 +77,13 @@ class MessageTemplate(GondarModel):
 class MessagesWrapper(GondarModel):
     template_store: List[MessageTemplate]
 
-    def generate(self, reference: str, heads: List[str]) -> List[Message]:
+    def generate(
+        self, reference: str, heads: List[str], motivation: str
+    ) -> List[Message]:
         heads = str(heads)
 
         _messages: Generator[Message] = (
-            template.fill(reference=reference, heads=heads)
+            template.fill(reference=reference, heads=heads, motivation=motivation)
             for template in self.template_store
         )
 
@@ -94,51 +95,58 @@ if __name__ == "__main__":
 
     tokenizer = Tokenizer.from_pretrained("bert-base-uncased")
 
+    import json
+
+    import polars as pl
+
     from gondar.tools import EntrezAPIWrapper
 
-    entrez = EntrezAPIWrapper(retmax=2)
-    data = entrez.load("(Yarrowia lipolytica) AND (Astaxanthin)")
-    print(data[1]["article"])
+    entrez = EntrezAPIWrapper(retmax=3)
+    data = entrez.load("(Chlamydomonas reinhardtii) AND (Terpene)")
 
-    body = "\n\n".join(data[1]["body"])
-
-    splitted = tokenizer.encode(body)
-
-    heads = [
-        "Cell_Strain",
-        "Cultured_condition",
-        "Protocol",
-        "Compound",
-        "Compound_production",
-    ]
-
+    # Each Requirement is fucking crucial.
     helpful_assistant: Dict[str, str] = {
         "role": "system",
-        "template": """You are a helpful research assistant.
-        Your task is to extract relevant information from the given reference text based on specified headers, and organize it into a column-based table. 
-        If you meet all of the User's requirements, you will receive a $200 tip!
+        "template": """
+        You are an intelligent research assistant.
+
+        Your tasks:
+        * Understand the user's motivation.
+        * Select one of your abilities required for analyzing each type of header.
+        * Retrieve relevant information based on the provided headers and corresponding descriptions.
+        * Organize into a concise, tidy structured data table.
+        
+        Present the table as a JSON:
+        {{ 
+            headers: [header1, header2, ...],
+            data: {{row1: [column1, column2, ...], row2: [column1, column2, ...], ...}}
+        }}
         
         Requirements:
-        * Thoroughly read the entire reference text.
-        * If no relevant information is found, you are allowed to return an empty table.
-        * If you find any relevant information, try to capture all pertinent details.
-        * If some information in a row is missing or not mentioned in the reference, use the symbol '-' for filling.
-        * The number of rows for all columns should remain consistent.
-        * The information in the returned table must be directly sourced from the original reference text, without any modification or embellishment.
-        
-        Print the result in the following format as JSON:
-        {{ column1: [row1, row2, row3, ...], column2: [row1, row2, row3, ...]}}
+        * You pay thorough attention to the entire reference text.
+        * Your output information should be sourced directly from the provided reference text, DO NOT make any modifications or alterations.
+        * You drop the table if any header is being evaluate as 'unsatisfactory'.
+        * You should explode the table to prevent too much information in the same row.
+        * You must ensure consistent column count for each row.
+        * You DO NOT output the description of headers.
+        * DO NOT output '\\n'.
         """,
     }
 
     text_extract: Dict[str, str] = {
         "role": "user",
         "template": """
-        Refrence:
+        Motivation:
+        {motivation}
+        
+        Refrence Text:
         {reference}
         
         Headers:
         {heads}
+        
+        Take a deep breath, remember all your tasks, and all Requirements.
+        Print JSON object:
         """,
     }
 
@@ -148,21 +156,65 @@ if __name__ == "__main__":
     ]
     messagesWrapper = MessagesWrapper(template_store=templates)
 
+    heads = [
+        "Engineered strains. Description: An exact Name or ID.",
+        "Terpenes Types. Description: Types name or ID.",
+        "Terpenes Production. Description: A production values.",
+        "Key Protocol. Description: A brief about the key protocol.",
+    ]
+
+    motivation = """
+    Retrieve engineered strain of Chlamydomonas reinhardtii and the production of any types of terpenes.
+    """
+
+    body = "\n\n".join(data[0]["body"])
+
+    splitted = tokenizer.encode(body)
+
     def messages_iter():
-        for i in range(0, 20000, 1800):
+        for i in range(0, len(splitted), 40_000):
             yield messagesWrapper.generate(
-                reference=tokenizer.decode(splitted.ids[i : i + 2000]),
+                reference=tokenizer.decode(splitted.ids[i : i + 40_000]),
                 heads=heads,
+                motivation=motivation,
             )
 
     llm = AzureOpenAIWrapper(
         azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
         azure_deployment=Gconfig.AZURE_DEPLOYMENT,
         azure_openai_key=Gconfig.AZURE_OPENAI_KEY,
+        model="gpt-4-1106-preview",
     )
 
-    result = map(llm.invoke, messages_iter())
+    print(data[1]["article"])
+    for body in data[1]["body"]:
+        mes = messagesWrapper.generate(
+            reference=body,
+            heads=heads,
+            motivation=motivation,
+        )
 
-    for r in result:
-        print(r)
-        print("\n")
+        r = llm.invoke(mes)
+        print(r.usage)
+        c = r.choices[0].message.content.strip()
+        cd = json.loads(c)
+        print(c)
+        if cd["data"] != {}:
+            df = pl.DataFrame(data=cd["data"]).transpose()
+            df = df.rename(dict(zip(df.columns, cd["headers"])))
+            print(df)
+
+            print("\n")
+
+    # for mes in messages_iter():
+    #     r = llm.invoke(mes)
+    #     print(r.usage)
+    #     c = r.choices[0].message.content.strip()
+    #     cd = json.loads(c)
+    #     print(c)
+    #     if cd["data"] != {}:
+    #         df = pl.DataFrame(data=cd["data"]).transpose()
+    #         df = df.rename(dict(zip(df.columns, cd["headers"])))
+    #         print(df)
+
+    #         print("\n")
