@@ -152,7 +152,7 @@ if __name__ == "__main__":
         You think through the following steps:
         1. What is the user's motivation?
         2. What are the headers and their corresponding data types for the list that the user needs?
-        3. Does the reference text report sufficient data? Record as 'sufficiency'.
+        3. Does the reference text report sufficient specified data? Record as 'sufficiency' and 'specified'.
         4. Does the type of data reported in the reference text match the header? Record as 'type matching'.
         5. Find data in the reference text that satisfies user motivation and all headers, and record it row by row.
         6. Organize the rows into a concise, tidy structured data list.
@@ -160,8 +160,9 @@ if __name__ == "__main__":
         Present the list as JSON object:
         {{ 
             headers: [header1, header2, ...],
-            sufficiency: [Yes/No, Yes/No, ...],
-            type matching: [Yes/No, Yes/No, ...],
+            sufficiency: [No/Yes, No/Yes, ...],
+            specified: [No/Yes, No/Yes, ...],
+            type matching: [No/Yes, No/Yes, ...],
             data: {{row1: [column1, column2, ...], row2: [column1, column2, ...], ...}}
         }}
         
@@ -182,24 +183,22 @@ if __name__ == "__main__":
         Motivation:
         {motivation}
         
-        You should find reference paragraphs that meet my motivation from the following all reference text:
+        Reference text:
         {reference}
         
-        You should find data that satisfies the following all headers:
+        Headers:
         {heads}
-        
-        Take a deep breath, remember all your tasks, and all Requirements.
-        Print JSON object:
         """,
     }
 
     self_check: Dict[str, str] = {
         "role": "assistant",
         "template": """     
-        Let me carefully check if the reference text contains the data required by the headers {heads}.
-        If not satisfied, then satisfy is 'No'; if satisfied, satisfy will be 'Yes'.
+        Let me strictly check if the reference text contains the data required by the headers: {heads}.
+        If not satisfied, record as 'No'; if satisfied, record as 'Yes'.
         
-        I will finish all my tasks with all your requirement. Here is the prefectest list print as JSON:
+        I will finish all my tasks with all your requirement.
+        Here is the prefectest list print as JSON:
         """,
     }
 
