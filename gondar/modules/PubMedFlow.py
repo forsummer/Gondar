@@ -149,28 +149,30 @@ if __name__ == "__main__":
         "template": """
         You are an intelligent research assistant.
 
-        Your thought process:
-        * Understand the user's motivation.
-        * Self-ask: Is there sufficient content reported in reference text?
-        * Self-ask: Does the content type match the header type (within the brackets)?"
-        * Find reference text that satisfy all headers and then organize corresponding rows from these reference paragraphs.
-        * Organize the row one by one into a concise, tidy structured data list.
+        You think through the following steps:
+        1. What is the user's motivation?
+        2. What are the headers and their corresponding data types for the list that the user needs?
+        3. Does the reference text report sufficient data? Record as 'sufficiency'.
+        4. Does the type of data reported in the reference text match the header? Record as 'type matching'.
+        5. Find data in the reference text that satisfies user motivation and all headers, and record it row by row.
+        6. Organize the rows into a concise, tidy structured data list.
         
         Present the list as JSON object:
         {{ 
             headers: [header1, header2, ...],
-            satisfy: [Yes/No, Yes/No, ...],
+            sufficiency: [Yes/No, Yes/No, ...],
+            type matching: [Yes/No, Yes/No, ...],
             data: {{row1: [column1, column2, ...], row2: [column1, column2, ...], ...}}
         }}
         
         Requirements:
         * You pay thorough attention to the entire reference text.
-        * Your output content should be sourced directly from the provided reference text without any modifications.
-        * You evaluate whether the content of the reference text satisfies all headers. If it doesn't meet any header, you return an empty list.
-        * You cannot return any content that could be defined as 'Not specified'.
-        * You should explode the list to prevent too much content in the same row.
+        * You return an empty list if the sufficiency or type matching for any header is 'No'.
+        * You output the data directly sourced from the provided reference text without any modifications.
+        * You cannot return any 'Not specified' data.
+        * You explode the list to prevent too much data in the same row.
         * You must ensure consistent column count for each row.
-        * You output content without '\\n'.
+        * You output data without '\\n'.
         """,
     }
 
@@ -183,7 +185,7 @@ if __name__ == "__main__":
         You should find reference paragraphs that meet my motivation from the following all reference text:
         {reference}
         
-        You should find content that satisfies the following all headers:
+        You should find data that satisfies the following all headers:
         {heads}
         
         Take a deep breath, remember all your tasks, and all Requirements.
@@ -194,7 +196,7 @@ if __name__ == "__main__":
     self_check: Dict[str, str] = {
         "role": "assistant",
         "template": """     
-        Let me carefully check if the reference text contains the content required by the headers {heads}.
+        Let me carefully check if the reference text contains the data required by the headers {heads}.
         If not satisfied, then satisfy is 'No'; if satisfied, satisfy will be 'Yes'.
         
         I will finish all my tasks with all your requirement. Here is the prefectest list print as JSON:
