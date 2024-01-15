@@ -1,7 +1,23 @@
-from pydantic import Field, create_model
+from inspect import stack as InspectStack
+from typing import Any
+
+from pydantic import BaseModel, Field, create_model
 from typing_extensions import Annotated
 
-from gondar.utils import DEFAULT_FALSE, POS_INT, POS_NUM, STR, GondarConfigModel
+from gondar.exception import ConfigError
+from gondar.utils import DEFAULT_FALSE, POS_INT, POS_NUM, STR
+
+
+class GondarConfigModel(BaseModel):
+    class Config:
+        validate_assignment = True
+
+    def __setattr__(self, __name: str, __value: Any) -> None:
+        calling_frame = InspectStack()[1]
+        if calling_frame.function == "__init__":
+            super().__setattr__(__name, __value)
+        else:
+            raise ConfigError(f"Gondar safe config {__name} is not allow to be modify.")
 
 
 class _IdentityConfig(GondarConfigModel):
