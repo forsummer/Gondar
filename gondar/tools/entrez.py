@@ -90,7 +90,10 @@ def get_Tables(article: BeautifulSoup) -> Dict[str, List]:
 
 
 class EntrezAPIWrapper(BaseModel):
-    """Wrapper around Entrez API."""
+    """Wrapper around Entrez API.
+
+    Document: https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
+    """
 
     esearch: Callable | None  #: :meta private:
     efetch: Callable | None  #: :meta private:
@@ -99,7 +102,6 @@ class EntrezAPIWrapper(BaseModel):
     restart: POS_INT = 0
     retmax: POS_INT = 3
     retmode: STR = "xml"
-    rettype: STR = "uilist"
     sort: STR = "relevance"
     datetype: STR = "pdat"
     reldate: STR = None
@@ -160,7 +162,6 @@ class EntrezAPIWrapper(BaseModel):
                 "restart": self.restart,
                 "retmax": self.retmax,
                 "retmode": self.retmode,
-                "rettype": self.rettype,
                 "sort": self.sort,
                 "datetype": self.datetype,
                 "reldate": self.reldate,
