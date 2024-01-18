@@ -34,11 +34,14 @@ This Flow model will directly provide interfaces for external access.
 
 """
 
+import json
 from typing import Any, Dict, Generator, List, Literal
 
+import polars as pl
 from pydantic import BaseModel, model_validator
 
 from gondar import Gconfig
+from gondar.tools import EntrezAPIWrapper
 from gondar.utils.types import POS_FLOAT, POS_INT, STR, VALID
 
 
@@ -71,8 +74,8 @@ class AzureOpenAIWrapper(GondarModel):
     response_format: Dict = {"type": "json_object"}
     temperature: POS_FLOAT = 0.0
 
-    max_retries: POS_INT = 2  # times
-    timeout: POS_INT = 300  # seconds
+    max_retries: POS_INT = 1  # times
+    timeout: POS_INT = 600  # seconds
 
     @model_validator(mode="before")
     @classmethod
@@ -105,59 +108,38 @@ class AzureOpenAIWrapper(GondarModel):
         )
 
 
-class MessageTemplate(GondarModel):
-    role: str
-    template: str
+class PromptTemplate(GondarModel):
+    template_store: List[Message]
 
-    def fill(self, **kwargs):
-        return Message(role=self.role, content=self.template.format(**kwargs))
-
-
-class MessagesWrapper(GondarModel):
-    template_store: List[MessageTemplate]
-
-    def generate(
-        self, reference: str, heads: List[str], motivation: str
-    ) -> List[Message]:
-        heads = str(heads)
-
+    def generate(self, **kwargs) -> List[Message]:
         _messages: Generator[Message] = (
-            template.fill(reference=reference, heads=heads, motivation=motivation)
-            for template in self.template_store
+            Message(role=mes.role, content=mes.content.format(**kwargs))
+            for mes in self.template_store
         )
 
         return [mes for mes in _messages]
 
 
-if __name__ == "__main__":
-    import json
-
-    import polars as pl
-
-    from gondar.tools import EntrezAPIWrapper
-
-    # NOTE: Model Tools (Interface Model of External API or Function)
-    entrez = EntrezAPIWrapper(retmax=3)
-
-    # NOTE: Model Document (Retrieved External Document Model)
-    data = entrez.load("(Chlamydomonas reinhardtii) AND (Terpene)")
-
-    # NOTE: Model PromptTemplate (The Template Model of Prompt)
-    # Each Requirement is fucking crucial. Don't even move a char.
-    helpful_assistant: Dict[str, str] = {
+class DocumentBodyExtractPromptTemplate(PromptTemplate):
+    system: Dict[str, str] = {
         "role": "system",
-        "template": """
-        You are an intelligent research assistant.
+        "content": """
+        Assistant are an intelligent research robot.
 
-        You think through the following steps:
-        1. What is the user's motivation?
-        2. What are the headers and their corresponding data types for the list that the user needs?
+        Assistant think through the following steps:
+        1. What's the user's motivation.?
+        2. What's the headers and their corresponding data types for the list that the user needs?
         3. Does the reference text report sufficient specified data? Record as 'sufficiency' and 'specified'.
         4. Does the type of data reported in the reference text match the header? Record as 'type matching'.
         5. Find data in the reference text that satisfies user motivation and all headers, and record it row by row.
         6. Organize the rows into a concise, tidy structured data list.
+
+        Assistant output only 3 types of data:
+        - Named Entity
+        - Values / Unit
+        - Brief
         
-        Present the list as JSON object:
+        Assistant present the list as JSON object:
         {{ 
             headers: [header1, header2, ...],
             sufficiency: [No/Yes, No/Yes, ...],
@@ -167,19 +149,17 @@ if __name__ == "__main__":
         }}
         
         Requirements:
-        * You pay thorough attention to the entire reference text.
-        * You return an empty list if the sufficiency or type matching for any header is 'No'.
-        * You output the data directly sourced from the provided reference text without any modifications.
-        * You cannot return any 'Not specified' data.
-        * You explode the list to prevent too much data in the same row.
-        * You must ensure consistent column count for each row.
-        * You output data without '\\n'.
+        - Assistant pay thorough attention to the entire reference text.
+        - Assistant return an empty list if the sufficiency or type matching for any header is 'No'.
+        - Assistant output the data directly sourced from the provided reference text without any modifications.
+        - Assistant explode the list to prevent too much data in the same row.
+        - Assistant must ensure consistent column count for each row.
         """,
     }
 
-    text_extract: Dict[str, str] = {
+    user: Dict[str, str] = {
         "role": "user",
-        "template": """
+        "content": """
         Motivation:
         {motivation}
         
@@ -187,42 +167,115 @@ if __name__ == "__main__":
         {reference}
         
         Headers:
-        {heads}
+        {headers}
         """,
     }
 
-    self_check: Dict[str, str] = {
+    assistant: Dict[str, str] = {
         "role": "assistant",
-        "template": """     
-        Let me strictly check if the reference text contains the data required by the headers: {heads}.
+        "content": """     
+        I strictly check if the reference text contains the data required by the headers: {headers}.
         If not satisfied, record as 'No'; if satisfied, record as 'Yes'.
         
-        I will finish all my tasks with all your requirement.
+        I will satisfied all system's introductions.
+        JSON object:
+        """,
+    }
+
+    template_store: List[Message] = [
+        Message(**system),
+        Message(**user),
+        Message(**assistant),
+    ]
+
+
+class TabularTrimmingPromptTemplate(PromptTemplate):
+    system: Dict[str, str] = {
+        "role": "system",
+        "content": """
+        Assistant are an intelligent research robot.
+        
+        Assistant think through the following steps:
+        1. Understand the user's motivation.
+        2. Understand the headers and their corresponding data types.
+        3. Check each data entry row by row to ensure that the data types match the names and data types specified in the header.
+        4. Identify all incomplete data.
+        5. Record the mismatching data entries and incomplete data as an integer within 'Delete'.
+        
+        Assistant present the list as JSON object:
+        {{
+            Delete: [1, 2, ...],
+        }}
+        
+        Requirements:
+        * Assistant pay thorough attention to the entire Tabular JSON.
+        """,
+    }
+
+    user: Dict[str, str] = {
+        "role": "user",
+        "content": """
+        Motivation:
+        {motivation}
+        
+        Tabular JSON:
+        {tabular}
+        """,
+    }
+
+    assistant: Dict[str, str] = {
+        "role": "assistant",
+        "content": """
+        I strictly check whether the type of each data strictly matches the header's data type that mentioned within the bracket: {headers}.
+        If it doesn't match, I record it in 'Delete'.
+        
+        I will finish all my tasks with all your requirements.
         Here is the prefectest list print as JSON:
         """,
     }
 
-    templates: List[MessageTemplate] = [
-        MessageTemplate(**helpful_assistant),
-        MessageTemplate(**text_extract),
-        MessageTemplate(**self_check),
+    template_store: List[Message] = [
+        Message(**system),
+        Message(**user),
+        Message(**assistant),
     ]
 
-    # NOTE: Model Messages (The Messages Model, adapting to the Agent Model)
-    messagesWrapper = MessagesWrapper(template_store=templates)
 
-    heads = [
-        "Engineered strains (Named Entity)",
-        "Terpenes Types (Named Entity)",
-        "Terpenes Production (Values / Unit)",
-        "Protocol (Brief)",
+def df_to_json(df: pl.DataFrame):
+    headers = df.columns
+
+    rows = df.rows()
+    rows = {f"row_{i}": list(rows[i]) for i in range(len(rows))}
+
+    return json.dumps(
+        {
+            "headers": headers,
+            "data": rows,
+        },
+        ensure_ascii=False,
+    )
+
+
+if __name__ == "__main__":
+    pl.Config.set_tbl_rows(100)
+
+    custom_kw = "(Yarrowia lipolytica) AND (astaxanthin)"
+
+    custom_headers: List[str] = [
+        "Strain of Yarrowia lipolytica (Named Entity)",
+        "Compound Types (Named Entity)",
+        "Compound Production (Values / Unit)",
     ]
+    custom_headers = str(custom_headers)
 
-    motivation = """
-    Retrieve engineered strain of Chlamydomonas reinhardtii and the production of any types of terpenes.
-    """
+    custom_motivation = "Retrieve strain of Yarrowia lipolytica and the production of any types of Compound."
 
-    # NOTE: Model Agent (The Agent model, an interface of LLM)
+    i = 2
+
+    entrez = EntrezAPIWrapper(retmax=3)
+
+    doc = entrez.load(custom_kw)
+
     llm = AzureOpenAIWrapper(
         azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
         azure_deployment=Gconfig.AZURE_DEPLOYMENT,
@@ -230,23 +283,72 @@ if __name__ == "__main__":
         model="gpt-4-1106-preview",
     )
 
-    print(data[0]["article"])
-    for body in data[0]["body"]:
-        mes = messagesWrapper.generate(
+    doc_extract = DocumentBodyExtractPromptTemplate()
+
+    total_prompt = 0
+    total_comp = 0
+
+    dfs = []
+    print(doc[i]["article"])
+    for body in doc[i]["body"]:
+        mes = doc_extract.generate(
             reference=body,
-            heads=heads,
-            motivation=motivation,
+            headers=custom_headers,
+            motivation=custom_motivation,
         )
 
-        # NOTE: Model Parser (The output parser that parsering the responese from LLM to constructured format)
-        res = llm.invoke(mes)
-        print(res.usage)
-        c = res.choices[0].message.content.strip()
-        cd = json.loads(c)
-        print(c)
-        if cd["data"] != {}:
-            df = pl.DataFrame(data=cd["data"]).transpose()
-            df = df.rename(dict(zip(df.columns, cd["headers"])))
-            print(df)
+        try:
+            res = llm.invoke(mes)
 
-            print("\n")
+            print(res.usage)
+            total_comp += res.usage.completion_tokens
+            total_prompt += res.usage.prompt_tokens
+
+            res_content = res.choices[0].message.content.strip()
+            print(res_content)
+            res_json = json.loads(res_content)
+
+            if res_json["data"] != {}:
+                df = pl.DataFrame(data=res_json["data"]).transpose()
+                df = df.rename(dict(zip(df.columns, res_json["headers"])))
+                print(df)
+
+                print("\n")
+
+                dfs.append(df)
+
+        except Exception as e:
+            print(e)
+            continue
+
+    sum_df: pl.DataFrame = pl.concat(dfs)
+    print(sum_df)
+
+    json_df = df_to_json(sum_df)
+
+    tabular_trim = TabularTrimmingPromptTemplate()
+
+    mes = tabular_trim.generate(
+        motivation=custom_motivation,
+        tabular=json_df,
+        headers=custom_headers,
+    )
+
+    res = llm.invoke(mes)
+
+    print(res.usage)
+    total_comp += res.usage.completion_tokens
+    total_prompt += res.usage.prompt_tokens
+
+    res_content = res.choices[0].message.content.strip()
+    print(res_content)
+    res_json = json.loads(res_content)
+
+    if res_json["Delete"] != {}:
+        deleted_index = [int(i) for i in res_json.get("Delete")]
+        filter_df = sum_df.filter(~pl.arange(0, pl.count()).is_in(deleted_index))
+
+    print(filter_df)
+
+    print(f"total prompt: {total_prompt}")
+    print(f"total completions: {total_comp}")
