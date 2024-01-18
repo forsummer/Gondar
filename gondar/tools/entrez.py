@@ -46,6 +46,10 @@ def get_Body(article: BeautifulSoup) -> Dict[str, List]:
         for table_wrap in sec.find_all("table-wrap"):
             table_wrap.decompose()
 
+    for sec in sections:
+        for table_wrap in sec.find_all("xref"):
+            table_wrap.decompose()
+
     section_contents: Generator[str] = (
         " ".join(section.stripped_strings) if section is not None else ""
         for section in sections
