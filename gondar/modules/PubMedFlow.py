@@ -76,7 +76,7 @@ class AzureOpenAIWrapper(GondarModel):
     seed: POS_INT = 1001
 
     max_retries: POS_INT = 1  # times
-    timeout: POS_INT = 600  # seconds
+    timeout: POS_INT = 90  # seconds
 
     @model_validator(mode="before")
     @classmethod
@@ -135,7 +135,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         5. Find data entry in the Document that satisfies user Purpose and all headers. Record as 'data'.
 
         Assistant output only 3 types of data:
-        - Named Entity: Must be a noun or term.
+        - Named Entity: Must be a noun or term with not exceeding 7 words.
         - Values/Unit: Must be a value and unit
         - Brief: Must be a concise description with not exceeding 30 words.
         
@@ -151,7 +151,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         Requirements:
         - Assistant pay thorough attention to the Document.
         - Assistant output empty list if the 'sufficient', 'specified' or 'type matching' for any header is 'No'.
-        - Assistant output the data directly sourced from the provided Document with reasoning inference.
+        - Assistant output the data directly sourced from the provided Document with reasonable inference.
         - Assistant explode the data list to ensure only one object is described in an entry.
         - Assistant ensure consistent column count for each row of entry.
         """,
@@ -160,9 +160,8 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
     user: Dict[str, str] = {
         "role": "user",
         "content": """
-        Document Start:
+        Document:
         {document}
-        Document End
 
         Purpose:
         {purpose}
@@ -209,7 +208,7 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
         }}
         
         Requirements:
-        * Assistant pay thorough attention to the entire Tabular JSON.
+        - Assistant pay thorough attention to the entire Tabular JSON.
         """,
     }
 
@@ -268,8 +267,6 @@ if __name__ == "__main__":
 
     custom_purpose = "Retrieve strain of Yarrowia lipolytica and the production of any types of Compound."
 
-    i = 2
-
     entrez = EntrezAPIWrapper(retmax=3)
 
     doc = entrez.load(custom_kw)
@@ -278,7 +275,6 @@ if __name__ == "__main__":
         azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
         azure_deployment=Gconfig.AZURE_DEPLOYMENT,
         azure_openai_key=Gconfig.AZURE_OPENAI_KEY,
-        model="gpt-4-1106-preview",
     )
 
     doc_extract = DocumentBodyExtractPromptTemplate()
@@ -286,67 +282,82 @@ if __name__ == "__main__":
     total_prompt = 0
     total_comp = 0
 
-    dfs = []
-    print(doc[i]["article"])
-    for body in doc[i]["body"]:
-        mes = doc_extract.generate(
-            document=body,
-            headers=custom_headers,
-            purpose=custom_purpose,
-        )
+    report = []
 
-        try:
-            res = llm.invoke(mes)
+    for i in range(len(doc)):
+        dfs = []
 
-            print(res.usage)
-            total_comp += res.usage.completion_tokens
-            total_prompt += res.usage.prompt_tokens
-
-            res_content = res.choices[0].message.content.strip()
-            print(res_content)
-            res_json = json.loads(res_content)
-
-            if res_json["data"] != {}:
-                df = pl.DataFrame(data=res_json["data"]).transpose()
-                df = df.rename(dict(zip(df.columns, res_json["headers"])))
-                print(df)
-
-                print("\n")
-
-                dfs.append(df)
-
-        except Exception as e:
-            print(e)
+        if doc[i]["body"] == []:
             continue
 
-    sum_df: pl.DataFrame = pl.concat(dfs)
-    print(sum_df)
+        print(doc[i]["article"])
 
-    json_df = df_to_json(sum_df)
+        for body in doc[i]["body"]:
+            mes = doc_extract.generate(
+                document=body,
+                headers=custom_headers,
+                purpose=custom_purpose,
+            )
 
-    tabular_trim = TabularTrimmingPromptTemplate()
+            try:
+                res = llm.invoke(mes)
 
-    mes = tabular_trim.generate(
-        purpose=custom_purpose,
-        tabular=json_df,
-        headers=custom_headers,
-    )
+                print(res.usage)
+                total_comp += res.usage.completion_tokens
+                total_prompt += res.usage.prompt_tokens
 
-    res = llm.invoke(mes)
+                res_content = res.choices[0].message.content.strip()
+                print(res_content)
+                res_json = json.loads(res_content)
 
-    print(res.usage)
-    total_comp += res.usage.completion_tokens
-    total_prompt += res.usage.prompt_tokens
+                if res_json["data"] != {}:
+                    df = pl.DataFrame(data=res_json["data"]).transpose()
+                    df = df.rename(dict(zip(df.columns, res_json["headers"])))
+                    print(df)
 
-    res_content = res.choices[0].message.content.strip()
-    print(res_content)
-    res_json = json.loads(res_content)
+                    print("\n")
 
-    if res_json["delete"] != {}:
-        deleted_index = [int(i) for i in res_json.get("delete")]
-        filter_df = sum_df.filter(~pl.arange(0, pl.count()).is_in(deleted_index))
+                    dfs.append(df)
 
-    print(filter_df)
+            except Exception as e:
+                print(e)
+                continue
+
+        sum_df: pl.DataFrame = pl.concat(dfs)
+        print(sum_df)
+
+        json_df = df_to_json(sum_df)
+
+        tabular_trim = TabularTrimmingPromptTemplate()
+
+        mes = tabular_trim.generate(
+            purpose=custom_purpose,
+            tabular=json_df,
+            headers=custom_headers,
+        )
+
+        res = llm.invoke(mes)
+
+        print(res.usage)
+        total_comp += res.usage.completion_tokens
+        total_prompt += res.usage.prompt_tokens
+
+        res_content = res.choices[0].message.content.strip()
+        print(res_content)
+        res_json = json.loads(res_content)
+
+        if res_json["delete"] != {}:
+            deleted_index = [int(i) for i in res_json.get("delete")]
+            filter_df = sum_df.filter(~pl.arange(0, pl.count()).is_in(deleted_index))
+
+        print(filter_df)
+
+        report.append(filter_df.unique(subset=filter_df.columns))
+
+    report: pl.DataFrame = pl.concat(report)
+    print(report)
+
+    report.write_csv("test_df.csv", separator=",")
 
     print(f"total prompt: {total_prompt}")
     print(f"total completions: {total_comp}")
