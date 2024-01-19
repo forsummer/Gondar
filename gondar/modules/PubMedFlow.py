@@ -125,21 +125,17 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
     system: Dict[str, str] = {
         "role": "system",
         "content": """
-        The Assistant is an excellent data crawler.
+        Assistant's Identity:
+        Assistant is an excellent data crawler.
 
-        Assistant will analyze step by step before scraping:
-        1. User's purpose is the task scenario.
-        2. Specify whether each header is to extract Named Entity, Values/Unit, or a Brief.
-        3. Determine whether the Document contains sufficient, specified data. Record as 'sufficient' and 'specified'.
-        4. Determine whether the data type reported in the Document match the header data type (Named Entity, Values/Unit, or Brief)? Record as 'type matching'.
-        5. Find data entry in the Document that satisfies user Purpose and all headers. Record as 'data'.
+        Assistant's Task:
+        Assistant scraping a data list to help the user complete the purpose by referencing the provided headers and examples from the document.
 
-        Assistant output only 3 types of data:
-        - Named Entity: Must be a noun or term with not exceeding 7 words.
-        - Values/Unit: Must be a value and unit
-        - Brief: Must be a concise description with not exceeding 30 words.
-        
-        Assistant present JSON object:
+        Assistant's self-requirements:
+        - Thoroughly paying attention to the entire document with no lazy.
+        - Directly scraping data from the document with reasonable inference.
+
+        JSON format of data list:
         {{ 
             headers: [header1, header2, ...],
             sufficient: [No/Yes, No/Yes, ...],
@@ -147,13 +143,22 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
             type matching: [No/Yes, No/Yes, ...],
             data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
         }}
-        
-        Requirements:
-        - Assistant pay thorough attention to the Document.
-        - Assistant output empty list if the 'sufficient', 'specified' or 'type matching' for any header is 'No'.
-        - Assistant output the data directly sourced from the provided Document with reasonable inference.
-        - Assistant explode the data list to ensure only one object is described in an entry.
-        - Assistant ensure consistent column count for each row of entry.
+
+        Assistant will carefully consider step by step before scraping:
+        1. Understand user's purpose.
+        2. Determine whether each header is to extract Named Entity, Values/Unit, or a Brief.
+        3. Determine whether the Document contains sufficient and specified data. Record as 'sufficient' and 'specified'.
+        4. Determine whether the data type reported in the Document match the header data type (Named Entity, Values/Unit, or Brief)? Record as 'type matching'.
+        5. Check if the Document contains the data required by the headers, output empty data list if the 'sufficient', 'specified' or 'type matching' for any header is 'No'.
+        6. Learn from the data entry examples provided by the user.
+        7. Scrap data entry one by one from Document that satisfies user Purpose and all headers. Record as 'data'.
+        8. Explode the data list to ensure only one object is described in an entry.
+        9. Ensure consistent column count for each row of entry.
+
+        Assistant output following types of data:
+        - Named Entity: Must be a noun or term with not exceeding 7 words.
+        - Values/Unit: Must be a value and unit
+        - Brief: Must be a concise description with not exceeding 30 words.
         """,
     }
 
@@ -168,16 +173,21 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         
         Headers:
         {headers}
+        
+        Data entry examples:
+        {examples}
         """,
     }
 
     assistant: Dict[str, str] = {
         "role": "assistant",
-        "content": """     
-        I strictly check if the Document contains the data required by the headers: {headers}.
-        If not satisfied, record as 'No'; if satisfied, record as 'Yes'.
+        "content": """
+        Let's do it with great enthusiasm and vigor!
         
-        I will satisfied all system's introduction.
+        First, I check the data types of each header.
+        Then, I check whether the data in the document satisfies 'sufficient', 'specified', or 'type matching' for each header: {headers}.
+        Finally, I refer to the data entry examples to print the data entries I have found.
+    
         JSON object:
         """,
     }
@@ -267,6 +277,12 @@ if __name__ == "__main__":
 
     custom_purpose = "Retrieve strain of Yarrowia lipolytica and the production of any types of Compound."
 
+    custom_examples = """
+    {{
+        data: {{entry1: ["Yarrowia lipolytica", "Astaxanthin", "3 mg/L"], entry2: ["Y. li", "β-Carotene", "20 mg/"]}}
+    }}
+    """
+
     entrez = EntrezAPIWrapper(retmax=3)
 
     doc = entrez.load(custom_kw)
@@ -297,6 +313,7 @@ if __name__ == "__main__":
                 document=body,
                 headers=custom_headers,
                 purpose=custom_purpose,
+                examples=custom_examples,
             )
 
             try:
