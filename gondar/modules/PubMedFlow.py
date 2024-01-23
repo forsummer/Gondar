@@ -131,6 +131,11 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         Assistant's Task:
         Assistant scraping a data list to help the user complete the purpose by referencing the provided headers and examples from the document.
 
+        Assistant output following types of data:
+        - Named Entity: A noun or term with not exceeding 5 words.
+        - Values/Unit: A value with unit, such as 1mg/L, 20%, and 3-fold.
+        - Brief: A concise description with not exceeding 31 words.
+
         Assistant's self-requirements:
         - Thoroughly paying attention to the entire document with no lazy.
         - Directly scraping data from the document with reasonable inference.
@@ -150,32 +155,23 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         3. Determine whether the Document contains sufficient and specified data. Record as 'sufficient' and 'specified'.
         4. Determine whether the data type reported in the Document match the header data type (Named Entity, Values/Unit, or Brief)? Record as 'type matching'.
         5. Check if the Document contains the data required by the headers, output empty data list if the 'sufficient', 'specified' or 'type matching' for any header is 'No'.
-        6. Learn from the data entry examples provided by the user.
+        6. Duplicate the data entry examples provided by users.
         7. Scrap data entry one by one from Document that satisfies user Purpose and all headers. Record as 'data'.
-        8. Explode the data list to ensure only one object is described in an entry.
+        8. Expand the data list to ensure only one object is described in an entry.
         9. Ensure consistent column count for each row of entry.
-
-        Assistant output following types of data:
-        - Named Entity: Must be a noun or term with not exceeding 7 words.
-        - Values/Unit: Must be a value and unit
-        - Brief: Must be a concise description with not exceeding 30 words.
         """,
     }
 
     user: Dict[str, str] = {
         "role": "user",
         "content": """
-        Document:
-        {document}
-
-        Purpose:
-        {purpose}
-        
-        Headers:
-        {headers}
-        
-        Data entry examples:
-        {examples}
+        User's JSON:
+        {{
+            "Document": "{document}",
+            "Purpose": "{purpose}",
+            "Headers": "{headers}",
+            "Data entry examples": "{examples}",
+        }}
         """,
     }
 
@@ -203,41 +199,56 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
     system: Dict[str, str] = {
         "role": "system",
         "content": """
+        Assistant's Identity:
         Assistant is a meticulous data analyst.
+
+        Assistant's Task:
+        assistant, based on reference data types and the user's purpose, removes data types in the user's tabular data that do not match the header and incomplete data.
         
-        Assistant will analyze step by step:
+        Assistant's self-requirements:
+        - Assistant pay thorough attention to the entire Tabular JSON.
+
+        Reference data types for assistant checking:
+        - Named Entity: A noun or term with not exceeding 5 words.
+        - Values/Unit: A value with unit, such as 1mg/L, 20%, and 3-fold.
+        - Brief: A concise description with not exceeding 31 words.
+
+        Assistant present JSON object:
+        {{
+            delete: [0,1,2,...],
+        }}
+
+        Assistant will carefully analyze step by step:
         1. User's purpose is the task scenario.
         2. Specify whether each header is to extract Named Entity, Values/Unit, or a Brief.
         3. Check data with mismatched data types and names against the headers.
         4. Check incomplete data.
         5. Record index of mismatching entries and incomplete entries as an integer within 'delete'.
-        
-        Assistant present JSON object:
-        {{
-            delete: [1,2,...],
-        }}
-        
-        Requirements:
-        - Assistant pay thorough attention to the entire Tabular JSON.
         """,
     }
 
     user: Dict[str, str] = {
         "role": "user",
         "content": """
-        Purpose:
-        {purpose}
-        
-        Tabular JSON:
-        {tabular}
+        User's JSON:
+        {{
+            "Purpose": "{purpose}",
+            "Tabular": "{tabular}",
+        }}
         """,
     }
 
     assistant: Dict[str, str] = {
         "role": "assistant",
         "content": """
-        I will finish all my tasks with all your requirements.
-        Here is the prefectest list print as JSON:
+        Let's do it with great enthusiasm and vigor!
+
+        First, I check the data types of each header.
+        Then, I check data with mismatched data types and names against the headers.
+        Next, I check incomplete data.
+        Finally, I record index of mismatching entries and incomplete entries.
+
+        JSON object:
         """,
     }
 
@@ -264,14 +275,15 @@ def df_to_json(df: pl.DataFrame):
 
 
 if __name__ == "__main__":
-    pl.Config.set_tbl_rows(100)
+    pl.Config.set_tbl_rows(20)
 
     custom_kw = "(Yarrowia lipolytica) AND (astaxanthin)"
 
     custom_headers: List[str] = [
-        "Named Entity: Strain of Yarrowia lipolytica",
-        "Named Entity: Compound Types",
+        "Named Entity: Strain",
+        "Named Entity: Compound Type",
         "Values/Unit: Compound Production",
+        "Named Entity: Pathway of Gene",
     ]
     custom_headers = str(custom_headers)
 
@@ -279,7 +291,7 @@ if __name__ == "__main__":
 
     custom_examples = """
     {{
-        data: {{entry1: ["Yarrowia lipolytica", "Astaxanthin", "3 mg/L"], entry2: ["Y. li", "β-Carotene", "20 mg/"]}}
+        data: {{entry1: ["Yarrowia lipolytica", "Astaxanthin", "3 mg/L", "EcAcrBp"]}}
     }}
     """
 
@@ -309,6 +321,8 @@ if __name__ == "__main__":
         print(doc[i]["article"])
 
         for body in doc[i]["body"]:
+            print(body)
+
             mes = doc_extract.generate(
                 document=body,
                 headers=custom_headers,
@@ -324,7 +338,7 @@ if __name__ == "__main__":
                 total_prompt += res.usage.prompt_tokens
 
                 res_content = res.choices[0].message.content.strip()
-                print(res_content)
+                print(res_content, "\n")
                 res_json = json.loads(res_content)
 
                 if res_json["data"] != {}:
@@ -366,6 +380,13 @@ if __name__ == "__main__":
         if res_json["delete"] != {}:
             deleted_index = [int(i) for i in res_json.get("delete")]
             filter_df = sum_df.filter(~pl.arange(0, pl.count()).is_in(deleted_index))
+            filter_df = filter_df.with_columns(
+                [
+                    pl.lit(v).alias(k)
+                    for k, v in doc[i].items()
+                    if k not in ["body", "tables"]
+                ]
+            )
 
         print(filter_df)
 
