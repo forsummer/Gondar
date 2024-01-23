@@ -51,7 +51,9 @@ def get_Body(article: BeautifulSoup) -> Dict[str, List]:
             table_wrap.decompose()
 
     section_contents: Generator[str] = (
-        " ".join(section.stripped_strings) if section is not None else ""
+        ". ".join(section.stripped_strings).replace(" (. )", "").replace(" [. ]", "")
+        if section is not None
+        else ""
         for section in sections
     )
 
