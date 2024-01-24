@@ -37,19 +37,21 @@ def get_Meta(article: BeautifulSoup) -> Dict[str, str]:
 def get_Body(article: BeautifulSoup) -> Dict[str, List]:
     """Get body text from soup"""
 
-    article_cp = deepcopy(article)
+    body = deepcopy(article.body)
+    if not body:
+        return {"body": []}
 
     # Clear unwanted elements
-    for table_wrap in article_cp.find_all("table-wrap"):
+    for table_wrap in body.find_all("table-wrap"):
         table_wrap.decompose()
-    for xref in article_cp.find_all("xref"):
+    for xref in body.find_all("xref"):
         xref.decompose()
-    for sup in article_cp.find_all("sup"):
+    for sup in body.find_all("sup"):
         sup.decompose()
 
     # Find out all paragraphs and return it as a string
     paragraphs: Generator[str] = (
-        " ".join(p.stripped_strings) for p in article_cp.find_all("p")
+        " ".join(p.stripped_strings) for p in body.find_all("p")
     )
 
     # Clean the meanless bracket for saving tokens usage
