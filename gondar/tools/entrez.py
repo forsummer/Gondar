@@ -34,6 +34,18 @@ def get_Meta(article: BeautifulSoup) -> Dict[str, str]:
     }
 
 
+def merge_short_strings_recursive(data: List[str]) -> List[str]:
+    if len(data) == 0:
+        return []
+
+    current_sentence = data[0]
+
+    if len(data) > 1 and len(data[1]) < 80:
+        return merge_short_strings_recursive([current_sentence + data[1]] + data[2:])
+    else:
+        return [current_sentence] + merge_short_strings_recursive(data[1:])
+
+
 def get_Body(article: BeautifulSoup) -> Dict[str, List]:
     """Get body text from soup"""
 
@@ -56,11 +68,19 @@ def get_Body(article: BeautifulSoup) -> Dict[str, List]:
 
     # Clean the meanless bracket for saving tokens usage
     cleaned_paras: Generator[str] = (
-        re.sub(r"\([^\w\d]*\)|\[[^\w\d]*\]|\{[^\w\d]*\}", "", p) for p in paragraphs
+        re.sub(
+            r"\((?:[^\w\d]*|[A-Z]+\.\s*;?\s*)+\)|\[(?:[^\w\d]*|[A-Z]+\.\s*;?\s*)+\]|\{(?:[^\w\d]*|[A-Z]+\.\s*;?\s*)+\}",
+            "",
+            p,
+        )
+        for p in paragraphs
     )
 
     # Split para as sentences
     sentences = sum([re.split(r"(?<=\.\s)(?=[A-Z])", p) for p in cleaned_paras], [])
+
+    # Merge short string
+    sentences = merge_short_strings_recursive(sentences)
 
     return {"body": sentences}
 
