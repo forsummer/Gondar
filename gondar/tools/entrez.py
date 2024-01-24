@@ -1,5 +1,6 @@
 """Util that calls PubMed Entrez."""
 import logging
+import re
 from copy import deepcopy
 from typing import Callable, Dict, Generator, Iterator, List
 
@@ -38,28 +39,28 @@ def get_Body(article: BeautifulSoup) -> Dict[str, List]:
 
     article_cp = deepcopy(article)
 
-    sections: List[BeautifulSoup] = list(
-        section for section in article_cp.find_all("sec")
+    # Clear unwanted elements
+    for table_wrap in article_cp.find_all("table-wrap"):
+        table_wrap.decompose()
+    for xref in article_cp.find_all("xref"):
+        xref.decompose()
+    for sup in article_cp.find_all("sup"):
+        sup.decompose()
+
+    # Find out all paragraphs and return it as a string
+    paragraphs: Generator[str] = (
+        " ".join(p.stripped_strings) for p in article_cp.find_all("p")
     )
 
-    for sec in sections:
-        for table_wrap in sec.find_all("table-wrap"):
-            table_wrap.decompose()
-
-    for sec in sections:
-        for table_wrap in sec.find_all("xref"):
-            table_wrap.decompose()
-
-    section_contents: Generator[str] = (
-        ". ".join(section.stripped_strings).replace(" (. )", "").replace(" [. ]", "")
-        if section is not None
-        else ""
-        for section in sections
+    # Clean the meanless bracket for saving tokens usage
+    cleaned_paras: Generator[str] = (
+        re.sub(r"\([^\w\d]*\)|\[[^\w\d]*\]|\{[^\w\d]*\}", "", p) for p in paragraphs
     )
 
-    return {
-        "body": list(section_contents),
-    }
+    # Split para as sentences
+    sentences = sum([re.split(r"(?<=\.\s)(?=[A-Z])", p) for p in cleaned_paras], [])
+
+    return {"body": sentences}
 
 
 def removeAllAttrs(soup: BeautifulSoup):
