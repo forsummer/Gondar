@@ -129,8 +129,8 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         Assistant scraping a data list to help the user complete the purpose by referencing the provided headers and examples from the document.
 
         Assistant output following data types:
-        - Named Entity: A noun or term with not exceeding 5 words.
-        - Value/Units: A number or a range of number, better with units. 
+        - Entity: A noun or term with not exceeding 5 words.
+        - Number: A number or a range of number, better with units. 
         - Brief: A concise description with not exceeding 31 words.
 
         Assistant's self-requirements:
@@ -138,12 +138,11 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         - Directly scraping data from the document with reasonable inference.
 
         Assistant will output the JSON step by step:
-        1. Understand user's purpose.
-        2. Output the name of each header in the "headers", excluding the data type.
-        3. Output the data types corresponding to each header in the "data type".
-        4. Carefully consider which arguments contain information that aligns with all headers.
-        5. Record the indices of arguments that satisfy all headers in the 'Available argument'. Output an empty list if found no satisfied arguments.
-        6. Output the data as an empty list if Available argument is empty list.
+        1. Output the name of each header in the "headers", excluding the data type.
+        2. Output the data types corresponding to each header in the "data type".
+        3. Carefully consider which arguments contain information that aligns with all headers.
+        4. Record the indices of arguments that satisfy all headers in the 'Available argument'. Output an empty list if found no satisfied arguments.
+        5. Output the data as an empty list if Available argument is empty list.
         if Available argument is not emtpy list, continue:
             1. Extract data entries that match the user's purpose, user-specified headers, and the data types corresponding to each header from the available arguments.
             2. Append the index of the referenced argument to the first column of each entry.
@@ -154,7 +153,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         JSON format:
         {{ 
             headers: [header1, header2, ...],
-            data type: [type1, type2, ...]
+            data type: [type1, type2, ...],
             Available argument: [0,1, ...],
             data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
         }}
@@ -208,8 +207,8 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
         - Assistant pay thorough attention to the entire Tabular JSON.
 
         Reference data types:
-        - Named Entity: A noun or term with not exceeding 5 words.
-        - Value/Units: An exact value with units. For examples: 1mg/L, 2%, 3-fold, 4μg/L·h-1, 5% increase. 
+        - Entity: A noun or term with not exceeding 5 words.
+        - Number: An exact value with units. For examples: 1mg/L, 2%, 3-fold, 4μg/L·h-1, 5% increase. 
         - Brief: A concise description with not exceeding 31 words.
 
         Assistant present JSON object:
@@ -222,7 +221,7 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
         Assistant will carefully analyze step by step:
         1. Understand user's purpose.
         2. Confirm the headers that the user wants to check rigorously. Record as "headers".
-        3. Check if each header is to extract Named Entity, Value/Units, or a Brief. Record as "data type".
+        3. Check if each header is to extract Entity, Number, or a Brief. Record as "data type".
         4. Retrieve data entry with misaligned data types and names against the headers. Record as an integer within 'delete'.
         5. Retrieve incomplete data. Record as an integer within 'delete'.
         """,
@@ -276,7 +275,7 @@ def df_to_json(df: pl.DataFrame):
     )
 
 
-def wrap_batch(content: List[str], load: int = 4096) -> Iterator[List[str]]:
+def wrap_batch(content: List[str], load: int = 3000) -> Iterator[List[str]]:
     content.reverse()
     batch = []
 
@@ -296,10 +295,10 @@ if __name__ == "__main__":
     custom_kw = "(Yarrowia lipolytica) AND (astaxanthin)"
 
     custom_headers: List[str] = [
-        "Named Entity: Strain",
-        "Named Entity: Compound Type",
-        "Value/Units: Compound Production",
-        "Named Entity: Pathway or Gene",
+        "Entity: Strain",
+        "Entity: Compound Type",
+        "Number: Compound Production",
+        "Entity: Pathway or Gene",
     ]
 
     custom_purpose = "Retrieve strain of Yarrowia lipolytica and the production of any types of Compound."
