@@ -35,7 +35,7 @@ This Flow model will directly provide interfaces for external access.
 """
 
 import json
-from typing import Any, Dict, Generator, List, Literal
+from typing import Any, Dict, Generator, Iterator, List, Literal
 
 import polars as pl
 from pydantic import BaseModel, model_validator
@@ -125,43 +125,39 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
     system: Dict[str, str] = {
         "role": "system",
         "content": """
-        Assistant's Identity:
         Assistant is an excellent data crawler.
-
-        Assistant's Task:
         Assistant scraping a data list to help the user complete the purpose by referencing the provided headers and examples from the document.
 
         Assistant output following data types:
         - Named Entity: A noun or term with not exceeding 5 words.
-        - Value/Units: An exact value with units. For examples: 1mg/L, 2%, 3-fold, 4μg/L·h-1, 5% increase. 
+        - Value/Units: A number or a range of number, better with units. 
         - Brief: A concise description with not exceeding 31 words.
 
         Assistant's self-requirements:
         - Thoroughly paying attention to the entire document with no lazy.
         - Directly scraping data from the document with reasonable inference.
-        - Prefer to output as little data as possible rather than outputting invalid or incorrect data.
 
-        JSON format of data list:
+        Assistant will output the JSON step by step:
+        1. Understand user's purpose.
+        2. Output the name of each header in the "headers", excluding the data type.
+        3. Output the data types corresponding to each header in the "data type".
+        4. Carefully consider which arguments contain information that aligns with all headers.
+        5. Record the indices of arguments that satisfy all headers in the 'Available argument'. Output an empty list if found no satisfied arguments.
+        6. Output the data as an empty list if Available argument is empty list.
+        if Available argument is not emtpy list, continue:
+            1. Extract data entries that match the user's purpose, user-specified headers, and the data types corresponding to each header from the available arguments.
+            2. Append the index of the referenced argument to the first column of each entry.
+            3. Data entries should be similar to the entry examples provided by the user.
+            4. Expand the data list to ensure only one object is described in an entry.
+            5. Ensure consistent column count for each row of entry.
+
+        JSON format:
         {{ 
             headers: [header1, header2, ...],
-            data type: [type1, type2, ...],
-            is Sufficient: [True/False, True/False, ...],
-            is Specified: [True/False, True/False, ...],
-            is TypeMatching: [True/False, True/False, ...],
-            data: {{entry1: [type1, type2, ...], entry2: [type1, type2, ...], ...}},
+            data type: [type1, type2, ...]
+            Available argument: [0,1, ...],
+            data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
         }}
-
-        Assistant will carefully consider step by step:
-        1. Understand user's purpose.
-        2. Strict check if each header is to extract Named Entity, Value/Units, or a Brief. Record as "data type".
-        3. Strict check if the Document contains sufficient data for all entry? Record as 'is Sufficient'.
-        4. Strict check if the Document contains specified data for all entry? Record as 'is Specified'.
-        5. Strict check if the data type reported in the Document match the header's data type? Record as 'is TypeMatching'.
-        6. Output an empty data list if 'False' occurs within 'is Sufficient', 'is Specified', or 'is TypeMatching'.
-        7. Duplicate the data entry examples provided by users.
-        8. Retrieve data entry one by one from Document that satisfies user Purpose and all headers. Record as 'data'.
-        9. Expand the data list to ensure only one object is described in an entry.
-        10. Ensure consistent column count for each row of entry.
         """,
     }
 
@@ -170,10 +166,10 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         "content": """
         User's JSON:
         {{
-            "Document": {document},
             "Purpose": {purpose},
             "Headers": {headers},
-            "Data entry examples": {examples},
+            "Document": {document},
+            "Entry examples": {examples},
         }}
         """,
     }
@@ -182,11 +178,11 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         "role": "assistant",
         "content": """
         Let's do it with great enthusiasm and vigor!
-        
-        First, I check the data type of each header.
-        Then, I check if the data in the document satisfies 'sufficient', 'specified', or 'type matching' for each header: {headers}.
-        Finally, I refer to the data entry examples to print the data entries I have found.
-    
+
+        First, I understand the user's purpose, the meaning of each header and the corresponding data type.
+        Then, I retrieve arguments that have the aligned data for {headers}.
+        Finally, I output data entries based on the arguments and entry examples.
+
         JSON object:
         """,
     }
@@ -207,7 +203,7 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
 
         Assistant's Task:
         Check if the user-specified strict header aligns with the user purpose and the reference data types. If not, delete the misalign and incomplete data entries.
-        
+
         Assistant's self-requirements:
         - Assistant pay thorough attention to the entire Tabular JSON.
 
@@ -280,6 +276,20 @@ def df_to_json(df: pl.DataFrame):
     )
 
 
+def wrap_batch(content: List[str], load: int = 4096) -> Iterator[List[str]]:
+    content.reverse()
+    batch = []
+
+    while content:
+        batch.append(content.pop())
+        if sum(map(len, batch)) >= load:
+            yield batch
+            batch.clear()
+        else:
+            if not content:
+                yield batch
+
+
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(50)
 
@@ -291,17 +301,14 @@ if __name__ == "__main__":
         "Value/Units: Compound Production",
         "Named Entity: Pathway or Gene",
     ]
-    custom_headers = str(custom_headers)
 
     custom_purpose = "Retrieve strain of Yarrowia lipolytica and the production of any types of Compound."
 
-    custom_examples = """
-    {{
-        data: {{entry1: ["Yarrowia lipolytica", "Astaxanthin", "3 mg/L", "EcAcrBp"]}}
-    }}
-    """
+    custom_examples = {
+        "data": {"entry1": ["Yarrowia lipolytica", "Astaxanthin", "3 mg/L", "EcAcrBp"]},
+    }
 
-    entrez = EntrezAPIWrapper(retmax=20)
+    entrez = EntrezAPIWrapper(retmax=3)
 
     doc = entrez.load(custom_kw)
 
@@ -326,14 +333,16 @@ if __name__ == "__main__":
 
         print(doc[i]["article"])
 
-        for body in doc[i]["body"]:
-            print(body)
+        for batch in wrap_batch(doc[i]["body"]):
+            formatted_batch = {f"argument {i}": batch[i] for i in range(len(batch))}
+
+            print(formatted_batch)
 
             mes = doc_extract.generate(
-                document=body,
-                headers=custom_headers,
+                document=json.dumps(formatted_batch, ensure_ascii=False),
+                headers=str(custom_headers),
                 purpose=custom_purpose,
-                examples=custom_examples,
+                examples=str(custom_examples),
             )
 
             try:
@@ -348,8 +357,10 @@ if __name__ == "__main__":
                 res_json = json.loads(res_content)
 
                 if res_json["data"] != {}:
-                    df = pl.DataFrame(data=res_json["data"]).transpose()
-                    df = df.rename(dict(zip(df.columns, res_json["headers"])))
+                    df = pl.DataFrame(
+                        data=[v for k, v in res_json["data"].items()], orient="row"
+                    )
+                    df = df.rename(dict(zip(df.columns, ["ref"] + res_json["headers"])))
                     print(df)
 
                     print("\n")
