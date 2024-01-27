@@ -1,5 +1,6 @@
 """Util that calls PubMed Entrez."""
 import logging
+import re
 from copy import deepcopy
 from typing import Callable, Dict, Generator, Iterator, List
 
@@ -33,27 +34,55 @@ def get_Meta(article: BeautifulSoup) -> Dict[str, str]:
     }
 
 
+def merge_short_strings_recursive(data: List[str]) -> List[str]:
+    if len(data) == 0:
+        return []
+
+    current_sentence = data[0]
+
+    if len(data) > 1 and len(data[1]) < 80:
+        return merge_short_strings_recursive([current_sentence + data[1]] + data[2:])
+    else:
+        return [current_sentence] + merge_short_strings_recursive(data[1:])
+
+
 def get_Body(article: BeautifulSoup) -> Dict[str, List]:
     """Get body text from soup"""
 
-    article_cp = deepcopy(article)
+    body = deepcopy(article.body)
+    if not body:
+        return {"body": []}
 
-    sections: List[BeautifulSoup] = list(
-        section for section in article_cp.find_all("sec")
+    # Clear unwanted elements
+    for table_wrap in body.find_all("table-wrap"):
+        table_wrap.decompose()
+    for xref in body.find_all("xref"):
+        xref.decompose()
+    for sup in body.find_all("sup"):
+        sup.decompose()
+
+    # Find out all paragraphs and return it as a string
+    paragraphs: Generator[str] = (
+        " ".join(p.stripped_strings) for p in body.find_all("p")
     )
 
-    for sec in sections:
-        for table_wrap in sec.find_all("table-wrap"):
-            table_wrap.decompose()
-
-    section_contents: Generator[str] = (
-        " ".join(section.stripped_strings) if section is not None else ""
-        for section in sections
+    # Clean the meanless bracket for saving tokens usage
+    cleaned_paras: Generator[str] = (
+        re.sub(
+            r"\((?:[^\w\d]*|[A-Z]+\.\s*;?\s*)+\)|\[(?:[^\w\d]*|[A-Z]+\.\s*;?\s*)+\]|\{(?:[^\w\d]*|[A-Z]+\.\s*;?\s*)+\}",
+            "",
+            p,
+        )
+        for p in paragraphs
     )
 
-    return {
-        "body": list(section_contents),
-    }
+    # Split para as sentences
+    sentences = sum([re.split(r"(?<=\.\s)(?=[A-Z])", p) for p in cleaned_paras], [])
+
+    # Merge short string
+    sentences = merge_short_strings_recursive(sentences)
+
+    return {"body": sentences}
 
 
 def removeAllAttrs(soup: BeautifulSoup):
@@ -86,7 +115,10 @@ def get_Tables(article: BeautifulSoup) -> Dict[str, List]:
 
 
 class EntrezAPIWrapper(BaseModel):
-    """Wrapper around Entrez API."""
+    """Wrapper around Entrez API.
+
+    Document: https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
+    """
 
     esearch: Callable | None  #: :meta private:
     efetch: Callable | None  #: :meta private:
@@ -95,7 +127,6 @@ class EntrezAPIWrapper(BaseModel):
     restart: POS_INT = 0
     retmax: POS_INT = 3
     retmode: STR = "xml"
-    rettype: STR = "uilist"
     sort: STR = "relevance"
     datetype: STR = "pdat"
     reldate: STR = None
@@ -156,7 +187,6 @@ class EntrezAPIWrapper(BaseModel):
                 "restart": self.restart,
                 "retmax": self.retmax,
                 "retmode": self.retmode,
-                "rettype": self.rettype,
                 "sort": self.sort,
                 "datetype": self.datetype,
                 "reldate": self.reldate,
