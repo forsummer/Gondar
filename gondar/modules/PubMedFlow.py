@@ -273,13 +273,15 @@ def df_to_json(df: pl.DataFrame):
     )
 
 
-def wrap_batch(content: List[str], load: int = 8000) -> Iterator[List[str]]:
+def wrap_batch(
+    content: List[str], len_load: int = 8_000, num_load: int = 40
+) -> Iterator[List[str]]:
     content.reverse()
     batch = []
 
     while content:
         batch.append(content.pop())
-        if sum(map(len, batch)) >= load:
+        if (len(batch) == num_load) or (sum(map(len, batch)) >= len_load):
             yield batch
             batch.clear()
         else:
