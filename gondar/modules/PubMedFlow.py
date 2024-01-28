@@ -129,7 +129,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
 
         Assistant output following data types:
         - Entity: A noun or term with not exceeding 5 words.
-        - Number: A number or a range of number with units. 
+        - Number: Must include a number, can be also a range or a change of number, with units better.
         - Brief: A concise description with not exceeding 31 words.
 
         Assistant's self-requirements:
@@ -139,12 +139,12 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         Assistant will output the JSON step by step:
         1. Output the header in "headers", excluding the data type.
         2. Output the data types corresponding to each header in "data type".
-        3. Find high-quality arguments, which include sufficient information to fill all columns, record the indices in 'High-quality argument'.
-        4. Output the data as an empty list if High-quality argument is empty list.
-        if High-quality argument is not emtpy list, continue:
-            1. Extract high-quality data entries that include information to fill all columns of the entry from "High-quality argument".
+        3. Find high-quality arguments, which include sufficient information to fill all columns, record the indices (Int) in 'high-quality argument'.
+        4. Output the data as an empty list if high-quality argument is empty list.
+        if high-quality argument is not emtpy list, continue:
+            1. Extract high-quality data entries that include information to fill all columns of the entry from "high-quality argument".
             2. Drop low-quality data entries that include not sufficient information to fill all columns.
-            3. Append the index of the referenced high-quality argument to the first column of each entry.
+            3. Append the index (Int) of the referenced high-quality argument to the first column of each entry.
             4. Data entries should be similar to the entry examples provided by the user.
             5. Expand the data list to ensure only one entry is described in an row.
             6. Ensure consistent column count for each row of entry.
@@ -153,7 +153,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         {{ 
             headers: [header1, header2, ...],
             data type: [type1, type2, ...],
-            High-quality argument: [1,3,...],
+            high-quality argument: [1,3,...],
             data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
         }}
         """,
@@ -175,10 +175,10 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         "role": "assistant",
         "content": """Let me take a deep breath and think step by step.
 
-        First, I understand the user's purpose and print the headers and data types.
+        First, I understand the user's purpose and output the headers and data types.
         Then, I drop low-quality data entries.
-        Next, I print high-quality arguments, which include sufficient information to fill all columns for all of headers: {headers}.
-        Finally, I extract and output data entries based on the "High-quality argument".
+        Next, I output indices (Int) of high-quality arguments, which include sufficient information to fill all columns for all of headers: {headers}.
+        Finally, I extract and output data entries based on the "high-quality argument".
 
         JSON object: {{
         """,
