@@ -124,37 +124,36 @@ class PromptTemplate(GondarModel):
 class DocumentBodyExtractPromptTemplate(PromptTemplate):
     system: Dict[str, str] = {
         "role": "system",
-        "content": """
-        Assistant is an excellent data crawler.
-        Assistant scraping a data list to help the user complete the purpose by referencing the provided headers and examples from the document.
+        "content": """Assistant is an smart data analyst.
+        Assistant creates a data list to complete the user's purpose by referencing the headers and entry examples from the document.
 
         Assistant output following data types:
         - Entity: A noun or term with not exceeding 5 words.
-        - Number: A number or a range of number, better with units. 
+        - Number: A number or a range of number with units. 
         - Brief: A concise description with not exceeding 31 words.
 
         Assistant's self-requirements:
-        - Thoroughly paying attention to the entire document with no lazy.
-        - Directly scraping data from the document with reasonable inference.
+        - Thoroughly paying attention to the entire document.
+        - Directly extract data entries from the document with reasonable inference.
 
         Assistant will output the JSON step by step:
-        1. Output the name of each header in the "headers", excluding the data type.
-        2. Output the data types corresponding to each header in the "data type".
-        3. Carefully consider which arguments contain information that aligns with all headers.
-        4. Record the indices of arguments that satisfy all headers in the 'Available argument'. Output an empty list if found no satisfied arguments.
-        5. Output the data as an empty list if Available argument is empty list.
-        if Available argument is not emtpy list, continue:
-            1. Extract data entries that match the user's purpose, user-specified headers, and the data types corresponding to each header from the available arguments.
-            2. Append the index of the referenced argument to the first column of each entry.
-            3. Data entries should be similar to the entry examples provided by the user.
-            4. Expand the data list to ensure only one object is described in an entry.
-            5. Ensure consistent column count for each row of entry.
+        1. Output the header in "headers", excluding the data type.
+        2. Output the data types corresponding to each header in "data type".
+        3. Find high-quality arguments, which include sufficient information to fill all columns, record the indices in 'High-quality argument'.
+        4. Output the data as an empty list if High-quality argument is empty list.
+        if High-quality argument is not emtpy list, continue:
+            1. Extract high-quality data entries that include information to fill all columns of the entry from "High-quality argument".
+            2. Drop low-quality data entries that include not sufficient information to fill all columns.
+            3. Append the index of the referenced high-quality argument to the first column of each entry.
+            4. Data entries should be similar to the entry examples provided by the user.
+            5. Expand the data list to ensure only one entry is described in an row.
+            6. Ensure consistent column count for each row of entry.
 
         JSON format:
         {{ 
             headers: [header1, header2, ...],
             data type: [type1, type2, ...],
-            Available argument: [0,1, ...],
+            High-quality argument: [1,3,...],
             data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
         }}
         """,
@@ -162,8 +161,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
 
     user: Dict[str, str] = {
         "role": "user",
-        "content": """
-        User's JSON:
+        "content": """User's JSON:
         {{
             "Purpose": {purpose},
             "Headers": {headers},
@@ -175,14 +173,14 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
 
     assistant: Dict[str, str] = {
         "role": "assistant",
-        "content": """
-        Let's do it with great enthusiasm and vigor!
+        "content": """Let me take a deep breath and think step by step.
 
-        First, I understand the user's purpose, the meaning of each header and the corresponding data type.
-        Then, I retrieve arguments that have the aligned data for {headers}.
-        Finally, I output data entries based on the arguments and entry examples.
+        First, I understand the user's purpose and print the headers and data types.
+        Then, I drop low-quality data entries.
+        Next, I print high-quality arguments, which include sufficient information to fill all columns for all of headers: {headers}.
+        Finally, I extract and output data entries based on the "High-quality argument".
 
-        JSON object:
+        JSON object: {{
         """,
     }
 
@@ -275,7 +273,7 @@ def df_to_json(df: pl.DataFrame):
     )
 
 
-def wrap_batch(content: List[str], load: int = 3000) -> Iterator[List[str]]:
+def wrap_batch(content: List[str], load: int = 8000) -> Iterator[List[str]]:
     content.reverse()
     batch = []
 
