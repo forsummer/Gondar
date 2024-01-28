@@ -360,6 +360,9 @@ if __name__ == "__main__":
                         data=[v for k, v in res_json["data"].items()], orient="row"
                     )
                     df = df.rename(dict(zip(df.columns, ["ref"] + res_json["headers"])))
+                    df = df.with_columns(
+                        pl.Series("argument", [batch[i] for i in list(df["ref"])])
+                    ).drop("ref")
                     print(df)
 
                     print("\n")
