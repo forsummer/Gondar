@@ -194,60 +194,55 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
 class TabularTrimmingPromptTemplate(PromptTemplate):
     system: Dict[str, str] = {
         "role": "system",
-        "content": """
-        Assistant's Identity:
-        Assistant is a meticulous data analyst.
+        "content": """Assistant is an smart data analyst.
+        Assistant trims down a data list by checking data entries of specified headers (columns).
 
-        Assistant's Task:
-        Check if the user-specified strict header aligns with the user purpose and the reference data types. If not, delete the misalign and incomplete data entries.
+        Assistant allowed only following types of data and corresponding explanation:
+        - Entity: A noun or term.
+        - Number: Must include a number, can be also a range or a change.
+        - Brief: A concise description.
 
         Assistant's self-requirements:
-        - Assistant pay thorough attention to the entire Tabular JSON.
+        - Thoroughly paying attention to the entire data table.
+        - Cautiously delete data entries based on reasonable inference.
 
-        Reference data types:
-        - Entity: A noun or term with not exceeding 5 words.
-        - Number: An exact value with units. For examples: 1mg/L, 2%, 3-fold, 4μg/L·h-1, 5% increase. 
-        - Brief: A concise description with not exceeding 31 words.
+        Assistant will output the JSON step by step:
+        1. Output user specified headers that need to be checked in "check headers".
+        2. Output the data types corresponding to the header in "data type".
+        With check only "check headers", continue:
+            1. Check if the information in each column of the data entry accurately describes the corresponding headers that need to be checked.
+            2. Output the indices (Int) of the data entries found above in the "deleted entry".
 
-        Assistant present JSON object:
+        JSON format:
         {{
-            headers: [header1, header2, ...],
+            check headers: [header1, header3, ...],
             data type: [type1, type2, ...],
-            delete: [0,4,17,...],
+            deleted entry: [0,4,17,...],
         }}
-
-        Assistant will carefully analyze step by step:
-        1. Understand user's purpose.
-        2. Confirm the headers that the user wants to check rigorously. Record as "headers".
-        3. Check if each header is to extract Entity, Number, or a Brief. Record as "data type".
-        4. Retrieve data entry with misaligned data types and names against the headers. Record as an integer within 'delete'.
-        5. Retrieve incomplete data. Record as an integer within 'delete'.
         """,
     }
 
     user: Dict[str, str] = {
         "role": "user",
-        "content": """
-        User's JSON:
+        "content": """User's JSON:
         {{
             "Purpose": {purpose},
-            "Strict": {strict},
-            "Tabular": {tabular},
+            "Check On": {check_on},
+            "data": {table},
         }}
         """,
     }
 
     assistant: Dict[str, str] = {
         "role": "assistant",
-        "content": """
-        Let's do it with great enthusiasm and vigor!
+        "content": """Let me take a deep breath and think step by step.
 
-        First, I check the data types of each header.
-        Then, I check data entry with misaligned data types and names against the headers.
-        Next, I check incomplete data entry.
-        Finally, I record index of misaligned entries and incomplete entries.
+        First, I output the headers that need to be checked: {check_on}.
+        Then, I output the allowed data types of corresponding header.
+        Next, I check if the information in each column of the data entry accurately describes the corresponding headers.
+        Finally, I output the indices (Int) of such data entry in "deleted entry".
 
-        JSON object:
+        JSON object: {{
         """,
     }
 
@@ -274,7 +269,7 @@ def df_to_json(df: pl.DataFrame):
 
 
 def wrap_batch(
-    content: List[str], len_load: int = 8_000, num_load: int = 40
+    content: List[str], len_load: int = 10_000, num_load: int = 40
 ) -> Iterator[List[str]]:
     content.reverse()
     batch = []
@@ -290,21 +285,27 @@ def wrap_batch(
 
 
 if __name__ == "__main__":
-    pl.Config.set_tbl_rows(50)
+    pl.Config.set_tbl_rows(100)
 
     custom_kw = "(Yarrowia lipolytica) AND (astaxanthin)"
 
     custom_headers: List[str] = [
         "Entity: Strain",
         "Entity: Compound Type",
-        "Number: Compound Production",
+        "Number: Compound Yield",
         "Entity: Pathway or Gene",
     ]
 
-    custom_purpose = "Retrieve strain of Yarrowia lipolytica and the production of any types of Compound."
+    custom_purpose = (
+        "Retrieve strain of Yarrowia lipolytica and the Yield of any types of Compound."
+    )
 
     custom_examples = {
-        "data": {"entry1": ["Yarrowia lipolytica", "Astaxanthin", "3 mg/L", "EcAcrBp"]},
+        "data": {
+            "entry1": ["Yarrowia lipolytica", "Astaxanthin", "3 g/L", "EcAcrBp"],
+            "entry2": ["Y. li", "limonene", "1 mg/L", "WCO"],
+            "entry3": ["Y. lipolytica", "limonene", "∼20% increase", "ERG13p"],
+        },
     }
 
     entrez = EntrezAPIWrapper(retmax=3)
@@ -324,7 +325,7 @@ if __name__ == "__main__":
 
     report = []
 
-    for i in range(len(doc)):
+    for i in range(1, len(doc)):
         dfs = []
 
         if doc[i]["body"] == []:
@@ -361,7 +362,7 @@ if __name__ == "__main__":
                     )
                     df = df.rename(dict(zip(df.columns, ["ref"] + res_json["headers"])))
                     df = df.with_columns(
-                        pl.Series("argument", [batch[i] for i in list(df["ref"])])
+                        pl.Series("Argument", [batch[i] for i in list(df["ref"])])
                     ).drop("ref")
                     print(df)
 
@@ -374,20 +375,23 @@ if __name__ == "__main__":
                 continue
 
         sum_df: pl.DataFrame = pl.concat(dfs)
-        print(sum_df)
+        print(sum_df.with_row_count("id"))
 
-        json_df = df_to_json(sum_df)
+        noArgColumns = sum_df.columns
+        noArgColumns.remove("Argument")
+        json_df = df_to_json(sum_df.select(noArgColumns))
+        print(json_df)
 
         tabular_trim = TabularTrimmingPromptTemplate()
 
-        mes = tabular_trim.generate(
-            purpose=custom_purpose,
-            tabular=json_df,
-            headers=custom_headers,
-            strict=str(["Strain", "Compound Type", "Compound Production"]),
-        )
-
         try:
+            mes = tabular_trim.generate(
+                purpose=custom_purpose,
+                table=json_df,
+                headers=custom_headers,
+                check_on=str(["Strain", "Compound Type", "Compound Production"]),
+            )
+
             res = llm.invoke(mes)
 
             print(res.usage)
@@ -398,8 +402,8 @@ if __name__ == "__main__":
             print(res_content)
             res_json = json.loads(res_content)
 
-            if res_json["delete"] != {}:
-                deleted_index = [int(i) for i in res_json.get("delete")]
+            if delete_index := res_json.get("deleted entry", None):
+                deleted_index = [int(i) for i in delete_index]
                 filter_df = sum_df.filter(
                     ~pl.arange(0, pl.count()).is_in(deleted_index)
                 )
@@ -411,18 +415,17 @@ if __name__ == "__main__":
                     ]
                 )
 
-            print(filter_df)
+            print(filter_df.with_row_count("id"))
 
             report.append(filter_df.unique(subset=filter_df.columns))
+            print(f"total prompt: {total_prompt}")
+            print(f"total completions: {total_comp}")
+
+            report_df: pl.DataFrame = pl.concat(report)
+            report_df.write_csv("test_df.csv", separator=",")
 
         except Exception as e:
             print(e)
             continue
-
-        print(f"total prompt: {total_prompt}")
-        print(f"total completions: {total_comp}")
-
-        report_df: pl.DataFrame = pl.concat(report)
-        report_df.write_csv("test_df.csv", separator=",")
 
     print(report_df)
