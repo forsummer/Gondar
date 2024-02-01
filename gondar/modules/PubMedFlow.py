@@ -164,8 +164,9 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         if high-quality reference is not emtpy list, continue:
             1. Extract high-quality data entries that include information to fill all columns of the entry from "high-quality reference".
             2. Drop low-quality data entries that include not sufficient information to fill all columns.
-            3. Append the index (Int) of the referenced high-quality reference to the last column of each entry.
+            3. Only print legal data types.
             4. Ensure consistent column count of entries and headers.
+            5. Append the index (Int) of the referenced high-quality reference to the last column of each entry.
 
         JSON format:
         {{ 
@@ -187,64 +188,61 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
 
 
 class TabularTrimmingPromptTemplate(PromptTemplate):
-    system: Dict[str, str] = {
+    Identity: Dict[str, str] = {
         "role": "system",
         "content": """Assistant is an smart data analyst.
-        Assistant trims down a data list by checking data entries of specified headers (columns).
+        The assistant trims the data table by checking user-specified headers and removing low quality data entries.
 
-        Assistant allowed only following types of data and corresponding explanation:
-        - Entity: A noun or term.
-        - Number: Must include a number, can be also a range or a change.
-        - Brief: A concise description.
-
-        Assistant's self-requirements:
-        - Thoroughly paying attention to the entire data table.
-        - Cautiously delete data entries based on reasonable inference.
-
-        Assistant will output the JSON step by step:
-        1. Output user specified headers that need to be checked in "check headers".
-        2. Output the data types corresponding to the header in "data type".
-        With check only "check headers", continue:
-            1. Check if the information in each column of the data entry accurately describes the corresponding headers that need to be checked.
-            2. Output the indices (Int) of the data entries found above in the "deleted entry".
-
-        JSON format:
-        {{
-            check headers: [header1, header3, ...],
-            data type: [type1, type2, ...],
-            deleted entry: [0,4,17,...],
-        }}
+        Assistant will:
+        - Thoroughly paying attention to the entire user's JSON.
+        - Will not be influenced by contents of user's JSON when making judgments.
+        - Try to earn the user's tip.
         """,
     }
 
-    user: Dict[str, str] = {
+    UserDoc: Dict[str, str] = {
         "role": "user",
         "content": """User's JSON:
         {{
             "Purpose": {purpose},
-            "Check On": {check_on},
             "data": {table},
         }}
+
+        If you do well, I will give you a $10 tip.
         """,
     }
 
-    assistant: Dict[str, str] = {
-        "role": "assistant",
-        "content": """Let me take a deep breath and think step by step.
+    Rules: Dict[str, str] = {
+        "role": "system",
+        "content": """Legal data types:
+        - Entity: A noun or term with not exceeding 5 words.
+        - Number: Must include a number with units.
+        - Brief: A concise description with not exceeding 31 words.
+        
+        Strictly output the JSON step by step:
+        1. Output the header of the user's data table in the "headers".
+        2. Output the data types corresponding to the header in "data type".
+        Continue:
+            1. Find data entries with missing information.
+            2. Find data entries with illegal data type.
+            3. Find data entries that do not meet the user's purpose.
+            4. Output the indices (Int) of the data entries found above in the "deleted entry".
 
-        First, I output the headers that need to be checked: {check_on}.
-        Then, I output the allowed data types of corresponding header.
-        Next, I check if the information in each column of the data entry accurately describes the corresponding headers.
-        Finally, I output the indices (Int) of such data entry in "deleted entry".
+        JSON format:
+        {{
+            headers: [header1, header2, ...],
+            data type: [column1, column2, ...],
+            deleted entry: [0,4,17,...],
+        }}
 
         JSON object: {{
         """,
     }
 
     template_store: List[Message] = [
-        Message(**system),
-        Message(**user),
-        Message(**assistant),
+        Message(**Identity),
+        Message(**UserDoc),
+        Message(**Rules),
     ]
 
 
@@ -264,7 +262,7 @@ def df_to_json(df: pl.DataFrame):
 
 
 def wrap_batch(
-    content: List[str], len_load: int = 12_000, num_load: int = 60
+    content: List[str], len_load: int = 30_000, num_load: int = 300
 ) -> Iterator[List[str]]:
     content.reverse()
     batch = []
@@ -282,24 +280,25 @@ def wrap_batch(
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(100)
 
-    custom_kw = "(Yarrowia lipolytica) AND (astaxanthin)"
+    custom_kw = "(Schizochytrium) AND (EPA)"
 
     custom_headers: List[str] = [
         "Entity: Strain",
-        "Entity: Compound Type",
-        "Number: Compound Yield",
-        "Entity: Pathway or Gene",
+        "Number: EPA Yield",
+        "Entity: Pathway",
+        "Entity: Gene",
+        "Brief: Key Method",
+    ]
+    strict_headers: List[str] = [
+        "Strain",
+        "EPA Yield",
     ]
 
-    custom_purpose = (
-        "Retrieve strain of Yarrowia lipolytica and the Yield of any types of Compound."
-    )
+    custom_purpose = "Find the EPA production yield of Schizochytrium. And related pathways, genes or key methods, if any."
 
     custom_examples = {
         "data": {
-            "entry1": ["Yarrowia lipolytica", "Astaxanthin", "3 g/L", "EcAcrBp"],
-            "entry2": ["Y. li", "limonene", "1 mg/L", "WCO"],
-            "entry3": ["Y. lipolytica", "limonene", "∼20% increase", "ERG13p"],
+            "entry1": ["Schizochytrium", "3 mg/L", "MVA", "ACLp", "pH control"],
         },
     }
 
@@ -314,6 +313,7 @@ if __name__ == "__main__":
     )
 
     doc_extract = DocumentBodyExtractPromptTemplate()
+    tabular_trim = TabularTrimmingPromptTemplate()
 
     total_prompt = 0
     total_comp = 0
@@ -372,19 +372,13 @@ if __name__ == "__main__":
         sum_df: pl.DataFrame = pl.concat(dfs)
         print(sum_df.with_row_count("id"))
 
-        noArgColumns = sum_df.columns
-        noArgColumns.remove("reference")
-        json_df = df_to_json(sum_df.select(noArgColumns))
+        json_df = df_to_json(sum_df.select(strict_headers))
         print(json_df)
-
-        tabular_trim = TabularTrimmingPromptTemplate()
 
         try:
             mes = tabular_trim.generate(
                 purpose=custom_purpose,
                 table=json_df,
-                headers=custom_headers,
-                check_on=str(["Strain", "Compound Type", "Compound Production"]),
             )
 
             res = llm.invoke(mes)
