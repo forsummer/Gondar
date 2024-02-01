@@ -122,44 +122,20 @@ class PromptTemplate(GondarModel):
 
 
 class DocumentBodyExtractPromptTemplate(PromptTemplate):
-    system: Dict[str, str] = {
+    Identity: Dict[str, str] = {
         "role": "system",
         "content": """Assistant is an smart data analyst.
         Assistant creates a data list to complete the user's purpose by referencing the headers and entry examples from the document.
 
-        Assistant output following data types:
-        - Entity: A noun or term with not exceeding 5 words.
-        - Number: Must include a number, can be also a range or a change of number, with units better.
-        - Brief: A concise description with not exceeding 31 words.
-
-        Assistant's self-requirements:
+        Assistant will:
         - Thoroughly paying attention to the entire document.
         - Directly extract data entries from the document with reasonable inference.
-
-        Assistant will output the JSON step by step:
-        1. Output the header in "headers", excluding the data type.
-        2. Output the data types corresponding to each header in "data type".
-        3. Find high-quality arguments, which include sufficient information to fill all columns, record the indices (Int) in 'high-quality argument'.
-        4. Output the data as an empty list if high-quality argument is empty list.
-        if high-quality argument is not emtpy list, continue:
-            1. Extract high-quality data entries that include information to fill all columns of the entry from "high-quality argument".
-            2. Drop low-quality data entries that include not sufficient information to fill all columns.
-            3. Append the index (Int) of the referenced high-quality argument to the first column of each entry.
-            4. Data entries should be similar to the entry examples provided by the user.
-            5. Expand the data list to ensure only one entry is described in an row.
-            6. Ensure consistent column count for each row of entry.
-
-        JSON format:
-        {{ 
-            headers: [header1, header2, ...],
-            data type: [type1, type2, ...],
-            high-quality argument: [1,3,...],
-            data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
-        }}
+        - Will not be influenced by contents of user's documents when making judgments.
+        - Try to earn the user's tip.
         """,
     }
 
-    user: Dict[str, str] = {
+    Users: Dict[str, str] = {
         "role": "user",
         "content": """User's JSON:
         {{
@@ -168,26 +144,45 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
             "Document": {document},
             "Entry examples": {examples},
         }}
+        
+        If you do well, I will give you a $10 tip.
         """,
     }
 
-    assistant: Dict[str, str] = {
-        "role": "assistant",
-        "content": """Let me take a deep breath and think step by step.
+    Rules: Dict[str, str] = {
+        "role": "system",
+        "content": """Legal data types:
+        - Entity: A noun or term with not exceeding 5 words.
+        - Number: Must include a number, can be also a range or a change of number, with units.
+        - Brief: A concise description with not exceeding 31 words.
 
-        First, I understand the user's purpose and output the headers and data types.
-        Then, I drop low-quality data entries.
-        Next, I output indices (Int) of high-quality arguments, which include sufficient information to fill all columns for all of headers: {headers}.
-        Finally, I extract and output data entries based on the "high-quality argument".
+        Strictly output the JSON step by step:
+        1. Output the header in "headers", excluding the data type.
+        2. Output the data types corresponding to each header in "data type".
+        3. Find high-quality reference, which include sufficient information to fill all columns, record the indices (Int) in 'high-quality reference'.
+        4. Output the data as an empty list if high-quality reference is empty list.
+        if high-quality reference is not emtpy list, continue:
+            1. Extract high-quality data entries that include information to fill all columns of the entry from "high-quality reference".
+            2. Drop low-quality data entries that include not sufficient information to fill all columns.
+            3. Append the index (Int) of the referenced high-quality reference to the last column of each entry.
+            4. Ensure consistent column count of entries and headers.
 
+        JSON format:
+        {{ 
+            headers: [header1, header2, ...],
+            data type: [column1, column2, ...],
+            high-quality reference: [1,3,...],
+            data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
+        }}
+        
         JSON object: {{
         """,
     }
 
     template_store: List[Message] = [
-        Message(**system),
-        Message(**user),
-        Message(**assistant),
+        Message(**Identity),
+        Message(**Users),
+        Message(**Rules),
     ]
 
 
@@ -269,7 +264,7 @@ def df_to_json(df: pl.DataFrame):
 
 
 def wrap_batch(
-    content: List[str], len_load: int = 10_000, num_load: int = 40
+    content: List[str], len_load: int = 12_000, num_load: int = 60
 ) -> Iterator[List[str]]:
     content.reverse()
     batch = []
@@ -334,7 +329,7 @@ if __name__ == "__main__":
         print(doc[i]["article"])
 
         for batch in wrap_batch(doc[i]["body"]):
-            formatted_batch = {f"argument {i}": batch[i] for i in range(len(batch))}
+            formatted_batch = {f"reference {i}": batch[i] for i in range(len(batch))}
 
             print(formatted_batch)
 
@@ -360,9 +355,9 @@ if __name__ == "__main__":
                     df = pl.DataFrame(
                         data=[v for k, v in res_json["data"].items()], orient="row"
                     )
-                    df = df.rename(dict(zip(df.columns, ["ref"] + res_json["headers"])))
+                    df = df.rename(dict(zip(df.columns, res_json["headers"] + ["ref"])))
                     df = df.with_columns(
-                        pl.Series("Argument", [batch[i] for i in list(df["ref"])])
+                        pl.Series("reference", [batch[i] for i in list(df["ref"])])
                     ).drop("ref")
                     print(df)
 
@@ -378,7 +373,7 @@ if __name__ == "__main__":
         print(sum_df.with_row_count("id"))
 
         noArgColumns = sum_df.columns
-        noArgColumns.remove("Argument")
+        noArgColumns.remove("reference")
         json_df = df_to_json(sum_df.select(noArgColumns))
         print(json_df)
 
