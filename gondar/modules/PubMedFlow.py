@@ -68,15 +68,16 @@ class AzureOpenAIWrapper(GondarModel):
     azure_openai_key: STR
     azure_api_version: STR = "2023-12-01-preview"
 
-    model: Literal[
-        "gpt-4-1106-preview", "gpt-35-turbo-1106"
-    ] = "gpt-4-1106-preview"  # Since 12/07/2023
+    model: Literal["gpt-4-1106-preview", "gpt-35-turbo-1106"] = (
+        "gpt-4-1106-preview"  # Since 12/07/2023
+    )
     response_format: Dict = {"type": "json_object"}
     temperature: POS_FLOAT = 0.0
     seed: POS_INT = 1001
 
-    max_retries: POS_INT = 2  # times
-    timeout: POS_INT = 90  # seconds
+    max_tokens: POS_INT = 300
+    max_retries: POS_INT = 1  # times
+    timeout: POS_INT = 60  # seconds
 
     @model_validator(mode="before")
     @classmethod
@@ -106,6 +107,7 @@ class AzureOpenAIWrapper(GondarModel):
             response_format=self.response_format,
             temperature=self.temperature,
             seed=self.seed,
+            max_tokens=self.max_tokens,
         )
 
 
@@ -125,12 +127,11 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
     Identity: Dict[str, str] = {
         "role": "system",
         "content": """Assistant is an smart data analyst.
-        Assistant creates a data list to complete the user's purpose by referencing the headers and entry examples from the document.
+        Assistant creates a data list to complete the user's purpose by referencing the headers and examples.
 
         Assistant will:
-        - Thoroughly paying attention to the entire document.
-        - Directly extract data entries from the document with reasonable inference.
-        - Will not be influenced by contents of user's documents when making judgments.
+        - Thoroughly paying attention to user's JSON.
+        - Directly extract data entries from user's document with reasonable inference.
         - Try to earn the user's tip.
         """,
     }
@@ -159,23 +160,21 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
         Strictly output the JSON step by step:
         1. Output the header in "headers", excluding the data type.
         2. Output the data types corresponding to each header in "data type".
-        3. Find high-quality reference, which include sufficient information to fill all columns, record the indices (Int) in 'high-quality reference'.
-        4. Output the data as an empty list if high-quality reference is empty list.
-        if high-quality reference is not emtpy list, continue:
-            1. Extract high-quality data entries that include information to fill all columns of the entry from "high-quality reference".
-            2. Drop low-quality data entries that include not sufficient information to fill all columns.
-            3. Only print legal data types.
-            4. Ensure consistent column count of entries and headers.
-            5. Append the index (Int) of the referenced high-quality reference to the last column of each entry.
+        3. Highlight the reference that can sufficiently fill all columns of data entry, output the index (Int) of those reference in "highlight".
+        4. Output the data as an empty list if highlight is empty list.
+        if highlight is not emtpy list, continue output the data entry step by step:
+            1. Extract data entries summarized from the highlight.
+            2. Ensure consistent column count of entries and headers.
+            3. Focus on up to three of the highlights which is the most relating to this data entry, append the index at the last column.
 
         JSON format:
         {{ 
             headers: [header1, header2, ...],
             data type: [column1, column2, ...],
-            high-quality reference: [1,3,...],
-            data: {{entry1: [column1, column2, ...], entry2: [column1, column2, ...], ...}},
+            highlight: [1,2,3,4,...],
+            data: {{entry1: [column1, column2, ..., [1]], entry2: [column1, column2, ..., [2,3]], ...}},
         }}
-        
+
         JSON object: {{
         """,
     }
@@ -200,7 +199,7 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
         """,
     }
 
-    UserDoc: Dict[str, str] = {
+    Users: Dict[str, str] = {
         "role": "user",
         "content": """User's JSON:
         {{
@@ -241,7 +240,7 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
 
     template_store: List[Message] = [
         Message(**Identity),
-        Message(**UserDoc),
+        Message(**Users),
         Message(**Rules),
     ]
 
@@ -262,7 +261,7 @@ def df_to_json(df: pl.DataFrame):
 
 
 def wrap_batch(
-    content: List[str], len_load: int = 30_000, num_load: int = 300
+    content: List[str], len_load: int = 60_000, num_load: int = 128
 ) -> Iterator[List[str]]:
     content.reverse()
     batch = []
@@ -294,7 +293,7 @@ if __name__ == "__main__":
         "EPA Yield",
     ]
 
-    custom_purpose = "Find the EPA production yield of Schizochytrium. And related pathways, genes or key methods, if any."
+    custom_purpose = "Find the EPA production yield of Schizochytrium. And related pathways, genes or key methods, if available."
 
     custom_examples = {
         "data": {
@@ -353,11 +352,17 @@ if __name__ == "__main__":
 
                 if res_json["data"] != {}:
                     df = pl.DataFrame(
-                        data=[v for k, v in res_json["data"].items()], orient="row"
+                        data=list(res_json["data"].values()), orient="row"
                     )
                     df = df.rename(dict(zip(df.columns, res_json["headers"] + ["ref"])))
                     df = df.with_columns(
-                        pl.Series("reference", [batch[i] for i in list(df["ref"])])
+                        pl.Series(
+                            "reference",
+                            [
+                                [batch[index] for index in indexes]
+                                for indexes in df["ref"]
+                            ],
+                        )
                     ).drop("ref")
                     print(df)
 
