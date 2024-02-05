@@ -1,4 +1,5 @@
 """Util that calls PubMed Entrez."""
+
 import logging
 import re
 from copy import deepcopy
@@ -12,10 +13,8 @@ from gondar.utils.types import POS_INT, STR, VALID
 
 logger = logging.getLogger(__name__)
 
-filter_meta: Callable[[BeautifulSoup | None, str], str] = (
-    lambda content, linker: linker.join(content.stripped_strings)
-    if content is not None
-    else ""
+filter_meta: Callable[[BeautifulSoup | None, str], str] = lambda content, linker: (
+    linker.join(content.stripped_strings) if content is not None else ""
 )
 
 
@@ -218,36 +217,18 @@ class EntrezAPIWrapper(BaseModel):
 
         return result
 
-    def run(self, query: str) -> str:
-        exception_msg = "No useable article was found. "
+    def load(self, query: str = None, ids: List[str] = None) -> List[Dict]:
+        if not query and not ids:
+            raise Exception("No query neither ids are given!")
 
-        ids: List[str | None] = self._search_ID(query=query)
-        if ids == []:
-            return exception_msg
+        ids: List[str | None] = ids if ids else self._search_ID(query=query)
 
-        content: BeautifulSoup | None = self._fetch_content(ids=ids)
-        if content is None:
-            return exception_msg
-
-        parsed_articles: Generator[Dict] = (
-            self._parse_article(article=article)
-            for article in content.find_all(self.article_tag)
-        )
-
-        _merge_result: Callable[[Dict], str] = lambda res: "\n".join(
-            ("\n".join(res[key]) for key in res.keys())
-        )
-
-        return "\n\n".join([_merge_result(article) for article in parsed_articles])
-
-    def load(self, query: str) -> List[Dict]:
-        ids: List[str | None] = self._search_ID(query=query)
-        if ids is []:
-            return Exception("Found no any article id of query. ")
+        if not ids:
+            raise Exception("Found no any article id of query. ")
 
         content: BeautifulSoup | None = self._fetch_content(ids=ids)
         if content is None:
-            return Exception("Found no any article content of query. ")
+            raise Exception("Found no any article content of query. ")
 
         parsed_articles: Generator[Dict] = (
             self._parse_article(article=article)

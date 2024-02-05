@@ -75,7 +75,7 @@ class AzureOpenAIWrapper(GondarModel):
     temperature: POS_FLOAT = 0.0
     seed: POS_INT = 1001
 
-    max_tokens: POS_INT = 300
+    max_tokens: POS_INT = 500
     max_retries: POS_INT = 1  # times
     timeout: POS_INT = 60  # seconds
 
@@ -279,31 +279,32 @@ def wrap_batch(
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(100)
 
-    custom_kw = "(Schizochytrium) AND (EPA)"
+    custom_ids_path = ".local/PMC.ids.txt"
+    with open(custom_ids_path, "r") as file:
+        custom_ids = file.readlines()
 
     custom_headers: List[str] = [
         "Entity: Strain",
-        "Number: EPA Yield",
-        "Entity: Pathway",
-        "Entity: Gene",
-        "Brief: Key Method",
+        "Number: Max Eicosapentaenoic Acid Production",
+        "Entity: Related Gene",
+        "Entity: Related Pathway",
     ]
     strict_headers: List[str] = [
         "Strain",
-        "EPA Yield",
+        "Max Eicosapentaenoic Acid Production",
     ]
 
-    custom_purpose = "Find the EPA production yield of Schizochytrium. And related pathways, genes or key methods, if available."
+    custom_purpose = "Find a maximum EPA (Eicosapentaenoic acid) production of Schizochytrium. As well as any related genes or pathway, if available."
 
     custom_examples = {
         "data": {
-            "entry1": ["Schizochytrium", "3 mg/L", "MVA", "ACLp", "pH control"],
+            "entry1": ["Schizochytrium", "3 mg/L", "ACLp", "MVA"],
         },
     }
 
-    entrez = EntrezAPIWrapper(retmax=3)
+    entrez = EntrezAPIWrapper()
 
-    doc = entrez.load(custom_kw)
+    doc = entrez.load(ids=custom_ids)
 
     llm = AzureOpenAIWrapper(
         azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
@@ -319,7 +320,7 @@ if __name__ == "__main__":
 
     report = []
 
-    for i in range(1, len(doc)):
+    for i in range(0, len(doc)):
         dfs = []
 
         if doc[i]["body"] == []:
