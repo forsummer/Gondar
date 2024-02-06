@@ -75,7 +75,7 @@ class AzureOpenAIWrapper(GondarModel):
     temperature: POS_FLOAT = 0.0
     seed: POS_INT = 1001
 
-    max_tokens: POS_INT = 500
+    max_tokens: POS_INT = 2000
     max_retries: POS_INT = 1  # times
     timeout: POS_INT = 60  # seconds
 
@@ -123,54 +123,61 @@ class PromptTemplate(GondarModel):
         return [mes for mes in _messages]
 
 
+# TODO: The highlight prompt is not good enough. Considering about embedding with cosine similarity.
 class DocumentBodyExtractPromptTemplate(PromptTemplate):
     Identity: Dict[str, str] = {
         "role": "system",
-        "content": """Assistant is an smart data analyst.
-        Assistant creates a data list to complete the user's purpose by referencing the headers and examples.
+        "content": """
+        Assistant is an smart data analyst.
+        Assistant's task is create a data table to complete the researcher's purpose by referencing the headers and examples.
 
         Assistant will:
-        - Thoroughly paying attention to user's JSON.
-        - Directly extract data entries from user's document with reasonable inference.
-        - Try to earn the user's tip.
+        - Thoroughly paying attention to content provided by researcher.
+        - Directly extract information from researcher's document with reasonable inference.
+        - Try to earn the researcher's tip.
         """,
     }
 
-    Users: Dict[str, str] = {
+    researchers: Dict[str, str] = {
         "role": "user",
-        "content": """User's JSON:
-        {{
-            "Purpose": {purpose},
-            "Headers": {headers},
-            "Document": {document},
-            "Entry examples": {examples},
-        }}
-        
+        "content": """
+        researcher Purpose: {purpose}
+        researcher Headers: {headers}
+        researcher Document: {document}
+        researcher Examples: {examples}
+
         If you do well, I will give you a $10 tip.
         """,
     }
 
     Rules: Dict[str, str] = {
         "role": "system",
-        "content": """Legal data types:
+        "content": """
+        Legal data types:
         - Entity: A noun or term with not exceeding 5 words.
         - Number: Must include a number, can be also a range or a change of number, with units.
         - Brief: A concise description with not exceeding 31 words.
 
-        Strictly output the JSON step by step:
-        1. Output the header in "headers", excluding the data type.
-        2. Output the data types corresponding to each header in "data type".
-        3. Highlight the reference that can sufficiently fill all columns of data entry, output the index (Int) of those reference in "highlight".
-        4. Output the data as an empty list if highlight is empty list.
-        if highlight is not emtpy list, continue output the data entry step by step:
-            1. Extract data entries summarized from the highlight.
-            2. Ensure consistent column count of entries and headers.
-            3. Focus on up to three of the highlights which is the most relating to this data entry, append the index at the last column.
+        Output the JSON after thinking step by step:
+        Step1. Output the headers in "headers", excluding the data types.
+        Step2. Output the data types corresponding to each header in "data types".
+        Step3. Highlight the reference that can sufficiently fill all columns of data entry, output the index (Int) of those reference in "highlight".
+        Step4. Output the data as an empty list if highlight is empty list.
+
+        if highlight is not emtpy list, continue output the JSON after thinking step by step:
+        Step1. Extract data entries summarized from the highlight.
+        Step2. Ensure consistent column count of entries and headers.
+        Step3. Focus on up to three of the highlights which is the most relating to this data entry, append the index at the last column.
+
+        Hints:
+        1. Fewer highlights in the references can lead to a more focused generation of satisfactory results.
+        2. Highlight too much references is wasted.
+        3. Referencing legal data types can generate data entry that is easier for researchers to understand.
 
         JSON format:
-        {{ 
+        {{
             headers: [header1, header2, ...],
-            data type: [column1, column2, ...],
+            data types: [column1, column2, ...],
             highlight: [1,2,3,4,...],
             data: {{entry1: [column1, column2, ..., [1]], entry2: [column1, column2, ..., [2,3]], ...}},
         }}
@@ -181,7 +188,7 @@ class DocumentBodyExtractPromptTemplate(PromptTemplate):
 
     template_store: List[Message] = [
         Message(**Identity),
-        Message(**Users),
+        Message(**researchers),
         Message(**Rules),
     ]
 
@@ -190,18 +197,18 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
     Identity: Dict[str, str] = {
         "role": "system",
         "content": """Assistant is an smart data analyst.
-        The assistant trims the data table by checking user-specified headers and removing low quality data entries.
+        The assistant trims the data table by checking researcher-specified headers and removing low quality data entries.
 
         Assistant will:
-        - Thoroughly paying attention to the entire user's JSON.
-        - Will not be influenced by contents of user's JSON when making judgments.
-        - Try to earn the user's tip.
+        - Thoroughly paying attention to the entire researcher's JSON.
+        - Will not be influenced by contents of researcher's JSON when making judgments.
+        - Try to earn the researcher's tip.
         """,
     }
 
-    Users: Dict[str, str] = {
+    researchers: Dict[str, str] = {
         "role": "user",
-        "content": """User's JSON:
+        "content": """researcher's JSON:
         {{
             "Purpose": {purpose},
             "data": {table},
@@ -219,12 +226,12 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
         - Brief: A concise description with not exceeding 31 words.
         
         Strictly output the JSON step by step:
-        1. Output the header of the user's data table in the "headers".
+        1. Output the header of the researcher's data table in the "headers".
         2. Output the data types corresponding to the header in "data type".
         Continue:
             1. Find data entries with missing information.
             2. Find data entries with illegal data type.
-            3. Find data entries that do not meet the user's purpose.
+            3. Find data entries that do not meet the researcher's purpose.
             4. Output the indices (Int) of the data entries found above in the "deleted entry".
 
         JSON format:
@@ -240,7 +247,7 @@ class TabularTrimmingPromptTemplate(PromptTemplate):
 
     template_store: List[Message] = [
         Message(**Identity),
-        Message(**Users),
+        Message(**researchers),
         Message(**Rules),
     ]
 
@@ -261,7 +268,7 @@ def df_to_json(df: pl.DataFrame):
 
 
 def wrap_batch(
-    content: List[str], len_load: int = 60_000, num_load: int = 128
+    content: List[str], len_load: int = 100_000, num_load: int = 500
 ) -> Iterator[List[str]]:
     content.reverse()
     batch = []
@@ -279,32 +286,36 @@ def wrap_batch(
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(100)
 
-    custom_ids_path = ".local/PMC.ids.txt"
-    with open(custom_ids_path, "r") as file:
-        custom_ids = file.readlines()
+    # custom_ids_path = ".local/PMC.ids.txt"
+    # with open(custom_ids_path, "r") as file:
+    #     custom_ids = file.readlines()
+    custom_query = "(Chlamydomonas reinhardtii) AND (Fatty Acid)"
 
     custom_headers: List[str] = [
         "Entity: Strain",
-        "Number: Max Eicosapentaenoic Acid Production",
-        "Entity: Related Gene",
-        "Entity: Related Pathway",
+        "Number: Fatty Acid Types",
+        "Entity: Fatty Acid Yield",
+        "Entity: Related Key Methods",
+        "Entity: Related Genes",
+        "Entity: Related Pathways",
     ]
     strict_headers: List[str] = [
         "Strain",
-        "Max Eicosapentaenoic Acid Production",
+        "Fatty Acid Types",
+        "Fatty Acid Yield",
     ]
 
-    custom_purpose = "Find a maximum EPA (Eicosapentaenoic acid) production of Schizochytrium. As well as any related genes or pathway, if available."
+    custom_purpose = "Find Fatty acid production yield that generate by Chlamydomonas reinhardtii strain. As well as any related key methods, genes or pathway, if available."
 
     custom_examples = {
         "data": {
-            "entry1": ["Schizochytrium", "3 mg/L", "ACLp", "MVA"],
+            "entry1": ["C. reinhardtii", "DHA", "3 mg/L", "control pH", "ACLp", "MVA"],
         },
     }
 
-    entrez = EntrezAPIWrapper()
+    entrez = EntrezAPIWrapper(retmax=10)
 
-    doc = entrez.load(ids=custom_ids)
+    doc = entrez.load(query=custom_query)
 
     llm = AzureOpenAIWrapper(
         azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
