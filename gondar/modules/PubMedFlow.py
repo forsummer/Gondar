@@ -35,14 +35,14 @@ This Flow model will directly provide interfaces for external access.
 """
 
 import json
-from typing import Any, Dict, Generator, Iterator, List, Literal
+from typing import Dict, Generator, Iterator, List, Literal
 
 import polars as pl
-from pydantic import BaseModel, model_validator
-
+from pydantic import BaseModel
+from openai import Client as OpenAIClient
 from gondar import Gconfig
 from gondar.tools import EntrezAPIWrapper
-from gondar.utils.types import POS_FLOAT, POS_INT, STR, VALID
+from gondar.utils.types import POS_FLOAT, POS_INT
 
 
 class GondarModel(BaseModel):
@@ -55,18 +55,13 @@ class Message(GondarModel):
     content: str
 
 
-class AzureOpenAIWrapper(GondarModel):
+class AzureOpenAIChatWrapper(GondarModel):
     """
     Azure OpenAI API Document: \n
     https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/json-mode?tabs=python
     """
 
-    client: Any = None
-
-    azure_openai_endpoint: STR
-    azure_deployment: STR
-    azure_openai_key: STR
-    azure_api_version: STR = "2023-12-01-preview"
+    client: OpenAIClient = None
 
     model: Literal["gpt-4-1106-preview", "gpt-35-turbo-1106"] = (
         "gpt-4-1106-preview"  # Since 12/07/2023
@@ -79,28 +74,7 @@ class AzureOpenAIWrapper(GondarModel):
     max_retries: POS_INT = 1  # times
     timeout: POS_INT = 60  # seconds
 
-    @model_validator(mode="before")
-    @classmethod
-    def validate_import(cls, values: Dict) -> Dict:
-        try:
-            from openai import AzureOpenAI
-        except ImportError as error:
-            raise error("Failed to import AzureOpenAI from openai packages.")
-
-        return values
-
-    @model_validator(mode="after")
-    def validate_client(self) -> VALID:
-        from openai import AzureOpenAI
-
-        self.client = AzureOpenAI(
-            azure_endpoint=self.azure_openai_endpoint,
-            azure_deployment=self.azure_deployment,
-            api_version=self.azure_api_version,
-            api_key=self.azure_openai_key,
-        )
-
-    def invoke(self, messages: List[Message]) -> Dict:
+    def invoke(self, messages: List[Message]):
         return self.client.chat.completions.create(
             messages=messages,
             model=self.model,
@@ -109,6 +83,27 @@ class AzureOpenAIWrapper(GondarModel):
             seed=self.seed,
             max_tokens=self.max_tokens,
         )
+
+
+class AzureOpenAIEmbedWrapper(GondarModel):
+    """
+    Azure OpenAI Embedding Model
+    """
+
+    client: OpenAIClient = None
+
+    model: Literal["text-embedding-ada-002"] = "text-embedding-ada-002"
+    timeout: POS_INT = 60  # seconds
+
+    def invoke(self, messages: List[str]):
+        return self.client.embeddings.create(
+            input=messages,
+            model=self.model,
+            timeout=self.timeout,
+        )
+
+
+def clustering(data: List): ...
 
 
 class PromptTemplate(GondarModel):
@@ -123,7 +118,6 @@ class PromptTemplate(GondarModel):
         return [mes for mes in _messages]
 
 
-# TODO: The highlight prompt is not good enough. Considering about embedding with cosine similarity.
 class DocumentBodyExtractPromptTemplate(PromptTemplate):
     Identity: Dict[str, str] = {
         "role": "system",
@@ -284,13 +278,12 @@ def wrap_batch(
 
 
 if __name__ == "__main__":
+    from openai import AzureOpenAI
+
     pl.Config.set_tbl_rows(100)
 
-    # custom_ids_path = ".local/PMC.ids.txt"
-    # with open(custom_ids_path, "r") as file:
-    #     custom_ids = file.readlines()
+    # User's content
     custom_query = "(Chlamydomonas reinhardtii) AND (Fatty Acid)"
-
     custom_headers: List[str] = [
         "Entity: Strain",
         "Number: Fatty Acid Types",
@@ -304,33 +297,35 @@ if __name__ == "__main__":
         "Fatty Acid Types",
         "Fatty Acid Yield",
     ]
-
     custom_purpose = "Find Fatty acid production yield that generate by Chlamydomonas reinhardtii strain. As well as any related key methods, genes or pathway, if available."
-
     custom_examples = {
         "data": {
             "entry1": ["C. reinhardtii", "DHA", "3 mg/L", "control pH", "ACLp", "MVA"],
         },
     }
 
-    entrez = EntrezAPIWrapper(retmax=10)
-
-    doc = entrez.load(query=custom_query)
-
-    llm = AzureOpenAIWrapper(
-        azure_openai_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
+    # Initial model client
+    client = AzureOpenAI(
+        azure_endpoint=Gconfig.AZURE_OPENAI_ENDPOINT,
         azure_deployment=Gconfig.AZURE_DEPLOYMENT,
-        azure_openai_key=Gconfig.AZURE_OPENAI_KEY,
+        api_version=Gconfig.AZURE_API_VERSION,
+        api_key=Gconfig.AZURE_OPENAI_KEY,
     )
+    chat_model = AzureOpenAIChatWrapper(client=client)
+    embed_model = AzureOpenAIEmbedWrapper(client=client)
 
-    doc_extract = DocumentBodyExtractPromptTemplate()
-    tabular_trim = TabularTrimmingPromptTemplate()
+    # Initial prompt template
+    extract_template = DocumentBodyExtractPromptTemplate()
+    trim_template = TabularTrimmingPromptTemplate()
 
+    # Results
     total_prompt = 0
     total_comp = 0
+    result = []
 
-    report = []
-
+    # Start
+    entrez = EntrezAPIWrapper(retmax=10)
+    doc = entrez.load(query=custom_query)
     for i in range(0, len(doc)):
         dfs = []
 
@@ -344,7 +339,7 @@ if __name__ == "__main__":
 
             print(formatted_batch)
 
-            mes = doc_extract.generate(
+            mes = extract_template.generate(
                 document=json.dumps(formatted_batch, ensure_ascii=False),
                 headers=str(custom_headers),
                 purpose=custom_purpose,
@@ -352,7 +347,7 @@ if __name__ == "__main__":
             )
 
             try:
-                res = llm.invoke(mes)
+                res = chat_model.invoke(mes)
 
                 print(res.usage)
                 total_comp += res.usage.completion_tokens
@@ -393,12 +388,12 @@ if __name__ == "__main__":
         print(json_df)
 
         try:
-            mes = tabular_trim.generate(
+            mes = trim_template.generate(
                 purpose=custom_purpose,
                 table=json_df,
             )
 
-            res = llm.invoke(mes)
+            res = chat_model.invoke(mes)
 
             print(res.usage)
             total_comp += res.usage.completion_tokens
@@ -423,11 +418,11 @@ if __name__ == "__main__":
 
             print(filter_df.with_row_count("id"))
 
-            report.append(filter_df.unique(subset=filter_df.columns))
+            result.append(filter_df.unique(subset=filter_df.columns))
             print(f"total prompt: {total_prompt}")
             print(f"total completions: {total_comp}")
 
-            report_df: pl.DataFrame = pl.concat(report)
+            report_df: pl.DataFrame = pl.concat(result)
             report_df.write_csv("test_df.csv", separator=",")
 
         except Exception as e:
